@@ -1,21 +1,21 @@
 import librosa
 import numpy as np
 
-def analyze_amplitude(audio_file):
+def analyze_amplitude(y, sr):
     """
     Analyzes the global amplitude of an audio file.
     Returns the mean RMS in dBFS (Full Scale) and dBA (A-weighted).
     """
-    audio_file.seek(0)
-    y, sr = librosa.load(audio_file, sr=None)
-    
-    # Compute amplitude spectrogram
+    # Calculate global RMS amplitude in dBFS
     S, _ = librosa.magphase(librosa.stft(y, n_fft=2048, hop_length=512))
     rms = librosa.feature.rms(S=S)[0]
     
-    # Calculate A-weighted RMS for the entire recording
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
-    a_weights_amp = 10 ** (librosa.A_weighting(freqs) / 20)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        # Calculate A-weighted RMS for the entire recording
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+        a_weights_amp = 10 ** (librosa.A_weighting(freqs) / 20)
     S_a = S * a_weights_amp[:, np.newaxis]
     rms_a = librosa.feature.rms(S=S_a)[0]
     
