@@ -7,7 +7,23 @@ def render_sidebar_parameters():
     """
     Renders the sidebar UI elements and returns the selected parameters.
     """
-    st.sidebar.header("Legacy Pitch Analyser Parameters")
+    st.sidebar.header("Pitch Analyser Parameters")
+    
+    preset = st.sidebar.selectbox(
+        "Analysis Profile",
+        ["Custom (Manual Tuning)", "Rapid / Virtuosic", "Slow / Legato"],
+        help="Select a standardized preset to lock parameters across participants, ensuring experimental consistency."
+    )
+    
+    if preset == "Rapid / Virtuosic":
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 1, 0.20
+        disabled = True
+    elif preset == "Slow / Legato":
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.02, 10, 0.10
+        disabled = True
+    else:
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 10, 0.10
+        disabled = False
 
     instrument = st.sidebar.selectbox(
         "Select Instrument",
@@ -19,9 +35,10 @@ def render_sidebar_parameters():
         "Switch Probability (pYIN)", 
         min_value=0.001, 
         max_value=0.050, 
-        value=0.005, 
+        value=def_switch, 
         step=0.001,
         format="%.3f",
+        disabled=disabled,
         help="Penalizes rapid toggling between voiced/unvoiced states. Lower values favor longer sustained notes. You can manually enter the value if needed."
     )
 
@@ -29,8 +46,9 @@ def render_sidebar_parameters():
         "RMS Amplitude Threshold", 
         min_value=0.0, 
         max_value=1.0, 
-        value=0.01, 
+        value=def_rms, 
         step=0.005,
+        disabled=disabled,
         help="Minimum RMS energy required for a frame to be considered active. Filters out background noise and quiet transients."
     )
 
@@ -38,7 +56,8 @@ def render_sidebar_parameters():
         "Minimum Sustain Duration (frames)", 
         min_value=1, 
         max_value=100, 
-        value=10,
+        value=def_frames,
+        disabled=disabled,
         help="Minimum continuous frames a note must sustain to be included in the analysis. Discards short blips."
     )
 
@@ -46,8 +65,9 @@ def render_sidebar_parameters():
         "Maximum Pitch Slope", 
         min_value=0.05, 
         max_value=0.50, 
-        value=0.10, 
+        value=def_slope, 
         step=0.01,
+        disabled=disabled,
         help="Maximum allowed frame-to-frame pitch change (semitones) to strictly isolate horizontal steady-state notes. Discards glissandos and slides."
     )
     
@@ -146,3 +166,156 @@ def render_sequence_comparison(midi_seq, unp_seq, plg_seq):
         )
     else:
         st.info("Upload an audio file or MIDI reference to see the sequence comparison.")
+
+def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
+    """
+    Renders the DTW Metric Table which explicitly maps detected audio notes to the MIDI score.
+    """
+    st.subheader("DTW Note-by-Note Intonation Metrics")
+    st.caption("Use the checkboxes in the **Include** column to manually exclude corrupt notes (e.g. double-stops or tracking errors) from the Overall Summary calculation below. Unchecking a row will dynamically update the means.")
+    st.write("This table extracts the exact median frequency and deviation from the DTW-warped timeline, strictly bound to the MIDI note expectations.")
+    
+    if not dtw_metrics_unp and not dtw_metrics_plg:
+        st.info("No DTW metrics available to display.")
+        return
+        
+    df_list = []
+    
+    # Use the available array to dictate the structure since both depend entirely on the MIDI
+    reference_metrics = dtw_metrics_unp if dtw_metrics_unp else dtw_metrics_plg
+    
+    for i, ref_note in enumerate(reference_metrics):
+        row = {
+            "Note Index": ref_note["Note_Index"],
+            "Expected Note": ref_note["Expected_Note"],
+            "Target Freq (Hz)": ref_note["Expected_Target_Pitch_Hz"],
+        }
+        
+        dev_hz_unp = np.nan
+        dev_hz_plg = np.nan
+        
+        if dtw_metrics_unp and i < len(dtw_metrics_unp):
+            unp_note = dtw_metrics_unp[i]
+            row["Unplugged Dev (Hz)"] = unp_note["Deviation_Hz"]
+            row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
+            dev_hz_unp = unp_note["Deviation_Hz"]
+            
+        if dtw_metrics_plg and i < len(dtw_metrics_plg):
+            plg_note = dtw_metrics_plg[i]
+            row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
+            row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
+            dev_hz_plg = plg_note["Deviation_Hz"]
+            
+        if dtw_metrics_unp and dtw_metrics_plg:
+            row["Delta Dev (Unplugged - Plugged)"] = dev_hz_unp - dev_hz_plg
+            
+        df_list.append(row)
+        
+    df = pd.DataFrame(df_list)
+    df.set_index("Note Index", inplace=True)
+    
+    df.insert(0, "Include", True)
+    
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    disabled_cols = df.columns.drop("Include").tolist()
+    
+    edited_df = st.data_editor(
+        df.style.format("{:.2f}", subset=numeric_cols, na_rep="Missed"),
+        column_config={
+            "Include": st.column_config.CheckboxColumn(
+                "Include",
+                help="Select which notes to include in the overall summary means",
+                default=True,
+            )
+        },
+        disabled=disabled_cols,
+        width="stretch",
+        use_container_width=True
+    )
+    
+    excluded_indices = edited_df[~edited_df["Include"]].index.tolist()
+    
+    csv = edited_df.drop(columns=["Include"]).to_csv().encode('utf-8')
+    st.download_button(
+        label="Download DTW Metrics as CSV",
+        data=csv,
+        file_name='dtw_metrics_comparison.csv',
+        mime='text/csv',
+    )
+    
+    return excluded_indices
+
+def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=None):
+    """
+    Renders an overall performance summary table aggregating the note-by-note DTW metrics.
+    Includes Delta calculation between Unplugged and Plugged conditions.
+    """
+    if not dtw_metrics_unp and not dtw_metrics_plg:
+        return
+        
+    if excluded_indices is None:
+        excluded_indices = []
+        
+    st.write("**Overall DTW Performance Summary**")
+    
+    summary_data = []
+    
+    def calculate_means(metrics):
+        if not metrics:
+            return {
+                "mean RMS amplitude (dB FS)": np.nan, 
+                "mean RMS amplitude (dB A)": np.nan, 
+                "mean intonation deviation (Hz)": np.nan, 
+                "mean intonation deviation (cents)": np.nan
+            }
+            
+        filtered_metrics = [m for m in metrics if m["Note_Index"] not in excluded_indices]
+        
+        if not filtered_metrics:
+            return {
+                "mean RMS amplitude (dB FS)": np.nan, 
+                "mean RMS amplitude (dB A)": np.nan, 
+                "mean intonation deviation (Hz)": np.nan, 
+                "mean intonation deviation (cents)": np.nan
+            }
+            
+        df = pd.DataFrame(filtered_metrics)
+        return {
+            "mean RMS amplitude (dB FS)": df["Median_RMS_dBFS"].mean(),
+            "mean RMS amplitude (dB A)": df["Median_RMS_dBA"].mean(),
+            "mean intonation deviation (Hz)": df["Deviation_Hz"].mean(),
+            "mean intonation deviation (cents)": df["Deviation_Cents"].mean(),
+        }
+        
+    unp_means = calculate_means(dtw_metrics_unp)
+    plg_means = calculate_means(dtw_metrics_plg)
+    
+    unp_means["Condition"] = "Unplugged"
+    plg_means["Condition"] = "Plugged"
+    
+    summary_data.append(unp_means)
+    summary_data.append(plg_means)
+    
+    delta = {
+        "Condition": "Delta (Unplugged - Plugged)",
+        "mean RMS amplitude (dB FS)": unp_means["mean RMS amplitude (dB FS)"] - plg_means["mean RMS amplitude (dB FS)"],
+        "mean RMS amplitude (dB A)": unp_means["mean RMS amplitude (dB A)"] - plg_means["mean RMS amplitude (dB A)"],
+        "mean intonation deviation (Hz)": unp_means["mean intonation deviation (Hz)"] - plg_means["mean intonation deviation (Hz)"],
+        "mean intonation deviation (cents)": unp_means["mean intonation deviation (cents)"] - plg_means["mean intonation deviation (cents)"]
+    }
+    summary_data.append(delta)
+    
+    df_summary = pd.DataFrame(summary_data)
+    df_summary.set_index("Condition", inplace=True)
+    
+    numeric_cols = df_summary.select_dtypes(include=[np.number]).columns
+    st.dataframe(df_summary.style.format("{:.2f}", subset=numeric_cols, na_rep="N/A"), width="stretch")
+    
+    csv = df_summary.to_csv().encode('utf-8')
+    st.download_button(
+        label="Download DTW Summary as CSV",
+        data=csv,
+        file_name='dtw_summary.csv',
+        mime='text/csv',
+    )
+

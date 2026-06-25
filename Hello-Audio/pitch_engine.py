@@ -157,6 +157,7 @@ def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_fram
         'y': y,
         'f0': f0,
         'sr': sr,
+        'rms': rms,
         'final_mask': final_mask,
         'f0_target': metrics['f0_target'],
         'full_deviation': metrics['full_deviation'],

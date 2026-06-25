@@ -111,8 +111,9 @@ def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
     # 5. Build the mask and the expected audio pitch array natively on the audio timeline
     valid_dtw_mask = np.zeros(len(time_array), dtype=bool)
     expected_audio_pitch = np.full(len(time_array), np.nan)
+    expected_note_index = np.full(len(time_array), "", dtype=object)
     
-    for note in midi_notes:
+    for i, note in enumerate(midi_notes):
         start_time = note['Start_Time'] if isinstance(note, dict) else getattr(note, 'Start_Time', 0)
         end_time = note['End_Time'] if isinstance(note, dict) else getattr(note, 'End_Time', 0)
         pitch = note['Pitch'] if isinstance(note, dict) else getattr(note, 'Pitch', np.nan)
@@ -122,6 +123,95 @@ def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
         
         valid_dtw_mask[note_mask] = True
         expected_audio_pitch[note_mask] = pitch
+        expected_note_index[note_mask] = f"Note {i+1}"
         
-    return valid_dtw_mask, expected_audio_pitch
+    return valid_dtw_mask, expected_audio_pitch, warped_midi_timeline, expected_note_index
+
+def apply_octave_folding(f0_hz, expected_midi_pitch):
+    """
+    Globally folds an audio f0 pitch array into the nearest octave of the expected MIDI target.
+    This ensures both visual graphs and metric tables share the same corrected harmonic data.
+    """
+    import numpy as np
+    import librosa
+    
+    f0_midi = librosa.hz_to_midi(f0_hz)
+    valid_mask = ~np.isnan(f0_midi) & ~np.isnan(expected_midi_pitch)
+    
+    octave_offsets = np.zeros_like(f0_midi)
+    octave_offsets[valid_mask] = np.round((f0_midi[valid_mask] - expected_midi_pitch[valid_mask]) / 12.0)
+    
+    folded_f0_midi = f0_midi - (octave_offsets * 12.0)
+    folded_f0_hz = librosa.midi_to_hz(folded_f0_midi)
+    
+    return folded_f0_hz, folded_f0_midi
+
+def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline):
+    """
+    Extracts explicit note-by-note intonation metrics derived from the DTW warping path.
+    """
+    import numpy as np
+    import librosa
+    
+    dtw_results = []
+    
+    # We loop through the exact sequence of true MIDI notes
+    for i, note in enumerate(midi_notes):
+        start_time = note['Start_Time'] if isinstance(note, dict) else getattr(note, 'Start_Time', 0)
+        end_time = note['End_Time'] if isinstance(note, dict) else getattr(note, 'End_Time', 0)
+        pitch = note['Pitch'] if isinstance(note, dict) else getattr(note, 'Pitch', np.nan)
+        note_name = librosa.midi_to_note(pitch) if not np.isnan(pitch) else "Rest"
+        
+        # Isolate the audio frames warped to this exact note's time boundary
+        note_mask = (warped_midi_timeline >= start_time) & (warped_midi_timeline < end_time)
+        
+        # Apply the legacy final_mask to strictly filter out transients and slides
+        strict_note_mask = note_mask & final_mask
+        
+        if np.any(strict_note_mask):
+            # Extract values
+            note_f0 = f0[strict_note_mask]
+            note_rms = rms[strict_note_mask]
+            
+            # Median f0 inside this strict, folded island
+            median_f0 = np.nanmedian(note_f0)
+            median_midi = librosa.hz_to_midi(median_f0)
+            
+            # Deviation from the TRUE MIDI pitch (cents)
+            deviation_cents = (median_midi - pitch) * 100
+            
+            # Convert deviation to Hz
+            expected_hz = librosa.midi_to_hz(pitch)
+            deviation_hz = median_f0 - expected_hz
+            
+            # RMS in dBFS
+            median_rms_dbfs = 20 * np.log10(np.nanmedian(note_rms) + 1e-10)
+            
+            # RMS in dBA
+            median_rms_dba = median_rms_dbfs + librosa.A_weighting(median_f0)
+            
+            dtw_results.append({
+                'Note_Index': i + 1,
+                'Expected_Note': note_name,
+                'Median_Detected_Pitch_Hz': median_f0,
+                'Expected_Target_Pitch_Hz': expected_hz,
+                'Deviation_Cents': deviation_cents,
+                'Deviation_Hz': deviation_hz,
+                'Median_RMS_dBFS': median_rms_dbfs,
+                'Median_RMS_dBA': median_rms_dba
+            })
+        else:
+            # Safeguard for completely empty arrays (Missed or completely filtered out)
+            dtw_results.append({
+                'Note_Index': i + 1,
+                'Expected_Note': note_name,
+                'Median_Detected_Pitch_Hz': np.nan,
+                'Expected_Target_Pitch_Hz': librosa.midi_to_hz(pitch) if not np.isnan(pitch) else np.nan,
+                'Deviation_Cents': np.nan,
+                'Deviation_Hz': np.nan,
+                'Median_RMS_dBFS': np.nan,
+                'Median_RMS_dBA': np.nan
+            })
+            
+    return dtw_results
 

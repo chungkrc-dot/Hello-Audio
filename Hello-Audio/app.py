@@ -13,7 +13,11 @@ def main():
     st.title("Hello-Audio")
     st.write("""
     This application comparatively analyzes the amplitude and intonation of uploaded audio recordings. 
-    It isolates steady-state notes using pYIN and RMS amplitude thresholding, and utilizes a digital MIDI score as a reference to calculate intonation deviation.
+    It uses the pYIN algorithm combined with strict Pitch Analyser Parameters (configured in the sidebar) to isolate clean, steady-state notes while aggressively filtering out transients, glissandos, and background noise.
+
+    **Intonation Deviation Calculation:**
+    - **With MIDI Upload:** Unlocks the advanced **DTW Alignment Engine**, which mathematically aligns your performance to the true note-by-note MIDI targets and scores the deviation of the steady-state median pitch against the exact target.
+    - **Without MIDI Upload:** Falls back to the general **Legacy Analysis Engine**, which evaluates intonation deviation by comparing your performed pitch to the nearest absolute semitone on the 12-TET scale.
     """)
     
     # 1. Sidebar
@@ -61,17 +65,14 @@ def main():
             del st.session_state['analysis_results_midi']
             
     # 3. Execution Engine
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
-    with col_btn1:
-        dtw_clicked = st.button("Run DTW Alignment", type="primary")
-    with col_btn2:
-        legacy_clicked = st.button("Run Legacy Analysis", type="primary")
+    analyze_clicked = st.button("Run Analysis", type="primary")
 
-    if dtw_clicked or legacy_clicked:
+    if analyze_clicked:
         if file_unplugged is None and file_plugged is None:
             st.error("Please upload at least one audio file to run the analysis.")
         else:
-            st.session_state['active_view'] = 'dtw' if dtw_clicked else 'legacy'
+            # Smart Fallback Logic: Run DTW if MIDI is provided, otherwise fall back to Legacy
+            st.session_state['active_view'] = 'dtw' if file_midi is not None else 'legacy'
             st.session_state['analyze_clicked'] = True
             
             status_container = st.empty()
@@ -127,27 +128,69 @@ def main():
                 midi_timing = st.session_state.get('analysis_results_midi_timing', [])
                 if midi_timing:
                     import librosa
-                    from midi_alignment import get_alignment_mask
+                    from midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_octave_folding
                     from visualization import plot_alignment_diagnostics
+                    from ui_components import render_dtw_results_table, render_dtw_summary_table
+                    
+                    dtw_metrics_unp = None
+                    dtw_metrics_plg = None
+                    
                     st.subheader("DTW Alignment Diagnostics")
+                    
+                    col_t1, col_t2, col_t3 = st.columns(3)
+                    with col_t1:
+                        show_target = st.checkbox("Show DTW Bridge Target", value=True)
+                    with col_t2:
+                        show_extraneous = st.checkbox("Show Extraneous F0", value=True)
+                    with col_t3:
+                        show_matched = st.checkbox("Show Matched F0", value=True)
                     
                     if unp_ok:
                         st.write("**Unplugged Alignment:**")
                         time_array_unp = librosa.times_like(res_unp['f0'], sr=res_unp['sr'], hop_length=512)
-                        f0_midi_unp = librosa.hz_to_midi(res_unp['f0'])
-                        mask_unp, expected_unp = get_alignment_mask(midi_timing, time_array_unp, res_unp['y'], res_unp['sr'], hop_length=512)
-                        strict_mask_unp = mask_unp & res_unp['final_mask']
-                        fig_unp_dtw = plot_alignment_diagnostics(time_array_unp, f0_midi_unp, expected_unp, strict_mask_unp)
-                        st.pyplot(fig_unp_dtw)
+                        mask_unp, expected_unp, warped_unp, expected_note_index_unp = get_alignment_mask(midi_timing, time_array_unp, res_unp['y'], res_unp['sr'], hop_length=512)
+                        
+                        # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting
+                        folded_f0_hz_unp, folded_f0_midi_unp = apply_octave_folding(res_unp['f0'], expected_unp)
+                        
+                        # Re-calculate the slope filter on the mathematically folded pitch path to remove any artificial vertical cliffs
+                        import numpy as np
+                        folded_pitch_slope_unp = np.concatenate(([0], np.abs(np.diff(folded_f0_midi_unp))))
+                        folded_slope_mask_unp = (folded_pitch_slope_unp <= max_pitch_slope) | np.isnan(folded_pitch_slope_unp)
+                        
+                        strict_mask_unp = mask_unp & res_unp['final_mask'] & folded_slope_mask_unp
+                        fig_unp_dtw = plot_alignment_diagnostics(
+                            time_array_unp, folded_f0_midi_unp, expected_unp, strict_mask_unp, 
+                            expected_note_index_unp, show_target, show_extraneous, show_matched
+                        )
+                        st.plotly_chart(fig_unp_dtw, use_container_width=True)
+                        
+                        dtw_metrics_unp = calculate_dtw_metrics(midi_timing, time_array_unp, folded_f0_hz_unp, res_unp['rms'], res_unp['final_mask'], warped_unp)
                     
                     if plg_ok:
                         st.write("**Plugged Alignment:**")
                         time_array_plg = librosa.times_like(res_plg['f0'], sr=res_plg['sr'], hop_length=512)
-                        f0_midi_plg = librosa.hz_to_midi(res_plg['f0'])
-                        mask_plg, expected_plg = get_alignment_mask(midi_timing, time_array_plg, res_plg['y'], res_plg['sr'], hop_length=512)
-                        strict_mask_plg = mask_plg & res_plg['final_mask']
-                        fig_plg_dtw = plot_alignment_diagnostics(time_array_plg, f0_midi_plg, expected_plg, strict_mask_plg)
-                        st.pyplot(fig_plg_dtw)
+                        mask_plg, expected_plg, warped_plg, expected_note_index_plg = get_alignment_mask(midi_timing, time_array_plg, res_plg['y'], res_plg['sr'], hop_length=512)
+                        
+                        # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting
+                        folded_f0_hz_plg, folded_f0_midi_plg = apply_octave_folding(res_plg['f0'], expected_plg)
+                        
+                        # Re-calculate the slope filter on the mathematically folded pitch path to remove any artificial vertical cliffs
+                        import numpy as np
+                        folded_pitch_slope_plg = np.concatenate(([0], np.abs(np.diff(folded_f0_midi_plg))))
+                        folded_slope_mask_plg = (folded_pitch_slope_plg <= max_pitch_slope) | np.isnan(folded_pitch_slope_plg)
+                        
+                        strict_mask_plg = mask_plg & res_plg['final_mask'] & folded_slope_mask_plg
+                        fig_plg_dtw = plot_alignment_diagnostics(
+                            time_array_plg, folded_f0_midi_plg, expected_plg, strict_mask_plg, 
+                            expected_note_index_plg, show_target, show_extraneous, show_matched
+                        )
+                        st.plotly_chart(fig_plg_dtw, use_container_width=True)
+                        
+                        dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg)
+                        
+                    excluded_indices = render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg)
+                    render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices)
                 else:
                     st.info("Upload a MIDI reference to view DTW Alignment Diagnostics.")
 
