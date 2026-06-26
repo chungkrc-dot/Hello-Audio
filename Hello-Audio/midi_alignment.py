@@ -1,3 +1,10 @@
+"""
+midi_alignment.py
+-----------------
+The core mathematical engine for aligning audio to a MIDI reference using Dynamic Time Warping (DTW).
+This module handles synthesizing reference audio, performing DTW alignment, calculating octave-agnostic 
+pitch boundaries, and extracting precise intonation metrics bound strictly to the MIDI temporal expectations.
+"""
 import numpy as np
 
 
@@ -82,8 +89,11 @@ def compute_dtw_path(midi_chroma, audio_chroma):
 
 def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
     """
-    Orchestrates the DTW alignment process using Chroma vectors and builds a continuous
-    absolute-time bridge to map MIDI notes directly onto the audio timeline.
+    Main orchestration function for DTW alignment. 
+    1. Synthesizes a reference audio track from the MIDI sequence.
+    2. Runs DTW between the real audio and synthetic MIDI audio using Chroma CQT features.
+    3. Back-projects the MIDI temporal boundaries onto the real audio timeline.
+    4. Generates an inclusion mask that perfectly aligns with the expected notes.
     """
     import numpy as np
     import librosa
@@ -129,8 +139,9 @@ def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
 
 def apply_octave_folding(f0_hz, expected_midi_pitch):
     """
-    Globally folds an audio f0 pitch array into the nearest octave of the expected MIDI target.
-    This ensures both visual graphs and metric tables share the same corrected harmonic data.
+    Algorithm to mathematically fold the raw extracted pitch (f0) into the expected octave of the MIDI note.
+    This corrects algorithmic "octave errors" inherent in pYIN when tracking rich acoustic instruments, 
+    ensuring that a perfectly in-tune harmonic overtone is evaluated as the correct pitch.
     """
     import numpy as np
     import librosa
@@ -148,7 +159,10 @@ def apply_octave_folding(f0_hz, expected_midi_pitch):
 
 def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline):
     """
-    Extracts explicit note-by-note intonation metrics derived from the DTW warping path.
+    Extracts the final intonation and amplitude metrics for every note in the sequence.
+    It isolates the exact temporal island of the note using the DTW warped timeline, 
+    applies the strict pYIN/slope masks, and computes the mathematically robust Median 
+    to filter out transient attacks and glissandos.
     """
     import numpy as np
     import librosa

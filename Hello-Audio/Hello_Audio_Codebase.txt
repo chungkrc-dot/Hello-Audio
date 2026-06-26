@@ -1,0 +1,1457 @@
+
+
+=======================================================
+FILE: amplitude_analysis.py
+=======================================================
+
+"""
+amplitude_analysis.py
+---------------------
+Core engine for calculating acoustic intensity metrics.
+This module processes raw audio signals to extract global Root Mean Square (RMS) energy.
+It performs both absolute digital scaling (dBFS) and psychoacoustic human-hearing 
+perceptual weighting (dBA) across the entire recording.
+"""
+import librosa
+import numpy as np
+
+def analyze_amplitude(y, sr):
+    """
+    Analyzes the global amplitude of an audio file.
+    Returns the mean RMS in dBFS (Full Scale) and dBA (A-weighted).
+    """
+    # Calculate global RMS amplitude in dBFS
+    S, _ = librosa.magphase(librosa.stft(y, n_fft=2048, hop_length=512))
+    rms = librosa.feature.rms(S=S)[0]
+    
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        # Calculate A-weighted RMS for the entire recording
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+        a_weights_amp = 10 ** (librosa.A_weighting(freqs) / 20)
+    S_a = S * a_weights_amp[:, np.newaxis]
+    rms_a = librosa.feature.rms(S=S_a)[0]
+    
+    mean_dbfs = 20 * np.log10(np.clip(np.mean(rms), 1e-10, None))
+    mean_dba = 20 * np.log10(np.clip(np.mean(rms_a), 1e-10, None))
+    
+    return {
+        'mean_dbfs': mean_dbfs,
+        'mean_dba': mean_dba
+    }
+
+
+=======================================================
+FILE: app.py
+=======================================================
+
+"""
+app.py
+------
+Hello-Audio: A comparative intonation and amplitude analysis application.
+This orchestrator module manages the Streamlit UI state, handles file uploads, 
+and conditionally routes audio data to either the advanced DTW Alignment Engine 
+(if a MIDI reference is provided) or the Legacy Pitch Analysis Engine.
+"""
+import streamlit as st
+from pitch_engine import analyze_intonation
+from amplitude_analysis import analyze_amplitude
+from midi_parser import parse_midi, parse_midi_with_timing
+
+# Import our new modular UI and visualization components
+from ui_components import render_sidebar_parameters, render_results_table, render_sequence_comparison
+from visualization import render_pitch_track_visualizations
+
+def main():
+    st.set_page_config(page_title="Hello-Audio", layout="wide")
+    
+    st.title("Hello-Audio")
+    st.write("""
+    This application comparatively analyzes the amplitude and intonation of uploaded audio recordings. 
+    It uses the pYIN algorithm combined with strict Pitch Analyser Parameters (configured in the sidebar) to isolate clean, steady-state notes while aggressively filtering out transients, glissandos, and background noise.
+
+    **Intonation Deviation Calculation:**
+    - **With MIDI Upload:** Unlocks the advanced **DTW Alignment Engine**, which mathematically aligns your performance to the true note-by-note MIDI targets and scores the deviation of the steady-state median pitch against the exact target.
+    - **Without MIDI Upload:** Falls back to the general **Legacy Analysis Engine**, which evaluates intonation deviation by comparing your performed pitch to the nearest absolute semitone on the 12-TET scale.
+    """)
+    
+    # ==========================================
+    # 1. Sidebar Parameters
+    # ==========================================
+    # Configures the strict filtering thresholds (Switch Probability, RMS, Sustain, Slope)
+    # used by pYIN to isolate intentional, steady-state notes from noise.
+    instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope = render_sidebar_parameters()
+    
+    # ==========================================
+    # 2. File Uploads & State Management
+    # ==========================================
+    # Manages the physical file inputs and resets the processing state 
+    # whenever a new file is uploaded to prevent stale cache bugs.
+    col_u1, col_u2, col_u3 = st.columns(3)
+    with col_u1:
+        file_unplugged = st.file_uploader("Upload 'Unplugged' Audio (without earplugs)", type=["wav", "mp3"])
+    with col_u2:
+        file_plugged = st.file_uploader("Upload 'Plugged' Audio (with earplugs)", type=["wav", "mp3"])
+    with col_u3:
+        file_midi = st.file_uploader("Upload MIDI Reference (Optional)", type=["mid", "midi"])
+        
+    # State Management
+    if 'file_unplugged_name' not in st.session_state:
+        st.session_state['file_unplugged_name'] = ""
+    if 'file_plugged_name' not in st.session_state:
+        st.session_state['file_plugged_name'] = ""
+    if 'file_midi_name' not in st.session_state:
+        st.session_state['file_midi_name'] = ""
+    if 'analyze_clicked' not in st.session_state:
+        st.session_state['analyze_clicked'] = False
+
+    if file_unplugged is not None and file_unplugged.name != st.session_state['file_unplugged_name']:
+        st.session_state['analyze_clicked'] = False
+        st.session_state['file_unplugged_name'] = file_unplugged.name
+        if 'analysis_results_unplugged' in st.session_state:
+            del st.session_state['analysis_results_unplugged']
+        if 'extracted_unp' in st.session_state:
+            del st.session_state['extracted_unp']
+
+    if file_plugged is not None and file_plugged.name != st.session_state['file_plugged_name']:
+        st.session_state['analyze_clicked'] = False
+        st.session_state['file_plugged_name'] = file_plugged.name
+        if 'analysis_results_plugged' in st.session_state:
+            del st.session_state['analysis_results_plugged']
+        if 'extracted_plg' in st.session_state:
+            del st.session_state['extracted_plg']
+
+    if file_midi is not None and file_midi.name != st.session_state['file_midi_name']:
+        st.session_state['analyze_clicked'] = False
+        st.session_state['file_midi_name'] = file_midi.name
+        if 'analysis_results_midi' in st.session_state:
+            del st.session_state['analysis_results_midi']
+            
+    # ==========================================
+    # 3. Execution Engine
+    # ==========================================
+    # The core processing loop. It routes execution based on the presence of the MIDI file.
+    # Pitch extraction (pYIN) and MIDI parsing are heavily cached to prevent 
+    # redundant computation on UI refreshes.
+    analyze_clicked = st.button("Run Analysis", type="primary")
+
+    if analyze_clicked:
+        if file_unplugged is None and file_plugged is None:
+            st.error("Please upload at least one audio file to run the analysis.")
+        else:
+            # Smart Fallback Logic: Run DTW if MIDI is provided, otherwise fall back to Legacy
+            st.session_state['active_view'] = 'dtw' if file_midi is not None else 'legacy'
+            st.session_state['analyze_clicked'] = True
+            
+            status_container = st.empty()
+            status_container.info("Processing... If this is the first run, pitch extraction may take a moment.")
+            
+            from pitch_engine import extract_pitch_and_rms
+            
+            # Extract and cache
+            if file_unplugged is not None and 'extracted_unp' not in st.session_state:
+                with st.spinner("Extracting Pitch (Unplugged) using pYIN..."):
+                    st.session_state['extracted_unp'] = extract_pitch_and_rms(file_unplugged, instrument, switch_prob)
+                    
+            if file_plugged is not None and 'extracted_plg' not in st.session_state:
+                with st.spinner("Extracting Pitch (Plugged) using pYIN..."):
+                    st.session_state['extracted_plg'] = extract_pitch_and_rms(file_plugged, instrument, switch_prob)
+
+            if file_midi is not None and 'analysis_results_midi' not in st.session_state:
+                with st.spinner("Parsing MIDI Reference Sequence..."):
+                    st.session_state['analysis_results_midi'] = parse_midi(file_midi)
+                    st.session_state['analysis_results_midi_timing'] = parse_midi_with_timing(file_midi)
+            
+            # Fast analysis logic
+            if file_unplugged is not None:
+                with st.spinner("Processing 'Unplugged' Intonation..."):
+                    y, sr, f0, voiced_flag, rms = st.session_state['extracted_unp']
+                    res_unp = analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold, min_frames, max_pitch_slope)
+                    res_unp.update(analyze_amplitude(y, sr))
+                    st.session_state['analysis_results_unplugged'] = res_unp
+
+            if file_plugged is not None:
+                with st.spinner("Processing 'Plugged' Intonation..."):
+                    y, sr, f0, voiced_flag, rms = st.session_state['extracted_plg']
+                    res_plg = analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold, min_frames, max_pitch_slope)
+                    res_plg.update(analyze_amplitude(y, sr))
+                    st.session_state['analysis_results_plugged'] = res_plg
+
+            status_container.success("Processing complete!")
+
+    # ==========================================
+    # 4. Display Results & Rendering
+    # ==========================================
+    # Handles all visual output. Dynamically routes to either the DTW diagnostic view 
+    # or the Legacy sequential view based on the active state.
+    if st.session_state.get('analyze_clicked') and ('analysis_results_unplugged' in st.session_state or 'analysis_results_plugged' in st.session_state):
+        res_unp = st.session_state.get('analysis_results_unplugged', None)
+        res_plg = st.session_state.get('analysis_results_plugged', None)
+        active_view = st.session_state.get('active_view', 'legacy')
+        
+        unp_ok = res_unp is not None and res_unp['success']
+        plg_ok = res_plg is not None and res_plg['success']
+        
+        if (res_unp is not None and not unp_ok) or (res_plg is not None and not plg_ok):
+            st.warning("No stable notes detected in one or more recordings. Try lowering the RMS threshold or minimum duration.")
+            
+        if unp_ok or plg_ok:
+            if active_view == 'dtw':
+                midi_timing = st.session_state.get('analysis_results_midi_timing', [])
+                if midi_timing:
+                    import librosa
+                    from midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_octave_folding
+                    from visualization import plot_alignment_diagnostics
+                    from ui_components import render_dtw_results_table, render_dtw_summary_table
+                    
+                    dtw_metrics_unp = None
+                    dtw_metrics_plg = None
+                    
+                    st.subheader("DTW Alignment Diagnostics")
+                    
+                    col_t1, col_t2, col_t3 = st.columns(3)
+                    with col_t1:
+                        show_target = st.checkbox("Show DTW Bridge Target", value=True)
+                    with col_t2:
+                        show_extraneous = st.checkbox("Show Extraneous F0", value=True)
+                    with col_t3:
+                        show_matched = st.checkbox("Show Matched F0", value=True)
+                    
+                    if unp_ok:
+                        st.write("**Unplugged Alignment:**")
+                        time_array_unp = librosa.times_like(res_unp['f0'], sr=res_unp['sr'], hop_length=512)
+                        mask_unp, expected_unp, warped_unp, expected_note_index_unp = get_alignment_mask(midi_timing, time_array_unp, res_unp['y'], res_unp['sr'], hop_length=512)
+                        
+                        # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting
+                        folded_f0_hz_unp, folded_f0_midi_unp = apply_octave_folding(res_unp['f0'], expected_unp)
+                        
+                        # Re-calculate the slope filter on the mathematically folded pitch path to remove any artificial vertical cliffs
+                        import numpy as np
+                        folded_pitch_slope_unp = np.concatenate(([0], np.abs(np.diff(folded_f0_midi_unp))))
+                        folded_slope_mask_unp = (folded_pitch_slope_unp <= max_pitch_slope) | np.isnan(folded_pitch_slope_unp)
+                        
+                        strict_mask_unp = mask_unp & res_unp['final_mask'] & folded_slope_mask_unp
+                        fig_unp_dtw = plot_alignment_diagnostics(
+                            time_array_unp, folded_f0_midi_unp, expected_unp, strict_mask_unp, 
+                            expected_note_index_unp, show_target, show_extraneous, show_matched
+                        )
+                        st.plotly_chart(fig_unp_dtw, use_container_width=True)
+                        
+                        dtw_metrics_unp = calculate_dtw_metrics(midi_timing, time_array_unp, folded_f0_hz_unp, res_unp['rms'], res_unp['final_mask'], warped_unp)
+                    
+                    if plg_ok:
+                        st.write("**Plugged Alignment:**")
+                        time_array_plg = librosa.times_like(res_plg['f0'], sr=res_plg['sr'], hop_length=512)
+                        mask_plg, expected_plg, warped_plg, expected_note_index_plg = get_alignment_mask(midi_timing, time_array_plg, res_plg['y'], res_plg['sr'], hop_length=512)
+                        
+                        # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting
+                        folded_f0_hz_plg, folded_f0_midi_plg = apply_octave_folding(res_plg['f0'], expected_plg)
+                        
+                        # Re-calculate the slope filter on the mathematically folded pitch path to remove any artificial vertical cliffs
+                        import numpy as np
+                        folded_pitch_slope_plg = np.concatenate(([0], np.abs(np.diff(folded_f0_midi_plg))))
+                        folded_slope_mask_plg = (folded_pitch_slope_plg <= max_pitch_slope) | np.isnan(folded_pitch_slope_plg)
+                        
+                        strict_mask_plg = mask_plg & res_plg['final_mask'] & folded_slope_mask_plg
+                        fig_plg_dtw = plot_alignment_diagnostics(
+                            time_array_plg, folded_f0_midi_plg, expected_plg, strict_mask_plg, 
+                            expected_note_index_plg, show_target, show_extraneous, show_matched
+                        )
+                        st.plotly_chart(fig_plg_dtw, use_container_width=True)
+                        
+                        dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg)
+                        
+                    excluded_indices = render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg)
+                    render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices)
+                else:
+                    st.info("Upload a MIDI reference to view DTW Alignment Diagnostics.")
+
+            elif active_view == 'legacy':
+                # Sequence Comparison
+                midi_seq = st.session_state.get('analysis_results_midi', [])
+                unp_seq = res_unp['detected_notes_sequence'] if unp_ok else []
+                plg_seq = res_plg['detected_notes_sequence'] if plg_ok else []
+                render_sequence_comparison(midi_seq, unp_seq, plg_seq)
+                
+                # Legacy Tables
+                render_results_table(res_unp, res_plg, unp_ok, plg_ok)
+                
+                # Pitch Tracks
+                render_pitch_track_visualizations(unp_ok, plg_ok, res_unp, res_plg)
+
+if __name__ == "__main__":
+    main()
+
+
+=======================================================
+FILE: midi_alignment.py
+=======================================================
+
+"""
+midi_alignment.py
+-----------------
+The core mathematical engine for aligning audio to a MIDI reference using Dynamic Time Warping (DTW).
+This module handles synthesizing reference audio, performing DTW alignment, calculating octave-agnostic 
+pitch boundaries, and extracting precise intonation metrics bound strictly to the MIDI temporal expectations.
+"""
+import numpy as np
+
+
+def get_midi_chroma(midi_notes, sr, hop_length):
+    """
+    Synthesizes a basic sine-wave audio track from the MIDI score and extracts 12-bin Chroma CQT.
+    """
+    import numpy as np
+    import librosa
+    
+    if not midi_notes:
+        return np.array([])
+        
+    first_start = midi_notes[0]['Start_Time'] if isinstance(midi_notes[0], dict) else getattr(midi_notes[0], 'Start_Time', 0)
+    last_end = midi_notes[-1]['End_Time'] if isinstance(midi_notes[-1], dict) else getattr(midi_notes[-1], 'End_Time', 0)
+    
+    duration = last_end - first_start
+    total_samples = int(np.ceil(duration * sr))
+    y_midi = np.zeros(total_samples)
+    
+    t = np.arange(total_samples) / sr
+    
+    for note in midi_notes:
+        start_time = note['Start_Time'] if isinstance(note, dict) else getattr(note, 'Start_Time', 0)
+        end_time = note['End_Time'] if isinstance(note, dict) else getattr(note, 'End_Time', 0)
+        pitch = note['Pitch'] if isinstance(note, dict) else getattr(note, 'Pitch', np.nan)
+        
+        if np.isnan(pitch):
+            continue
+            
+        freq = librosa.midi_to_hz(pitch)
+        
+        local_start = start_time - first_start
+        local_end = end_time - first_start
+        
+        start_sample = int(np.floor(local_start * sr))
+        end_sample = int(np.ceil(local_end * sr))
+        
+        start_sample = max(0, start_sample)
+        end_sample = min(total_samples, end_sample)
+        
+        if start_sample < end_sample:
+            note_t = t[start_sample:end_sample] - local_start
+            wave = np.sin(2 * np.pi * freq * note_t)
+            y_midi[start_sample:end_sample] += wave
+            
+    chroma = librosa.feature.chroma_cqt(y=y_midi, sr=sr, hop_length=hop_length)
+    return chroma
+
+def get_audio_chroma(audio_y, sr, hop_length):
+    """
+    Extracts the 12-bin Chroma CQT from the raw audio waveform.
+    """
+    import librosa
+    return librosa.feature.chroma_cqt(y=audio_y, sr=sr, hop_length=hop_length)
+
+def compute_dtw_path(midi_chroma, audio_chroma):
+    """
+    Computes the Dynamic Time Warping (DTW) path using multi-dimensional Chroma features.
+    """
+    import numpy as np
+    import librosa
+    
+    # Subsequence DTW requires the shorter query sequence to be the first argument (X) 
+    # and the longer reference sequence to be the second argument (Y).
+    D, wp = librosa.sequence.dtw(
+        midi_chroma, 
+        audio_chroma, 
+        metric='cosine', 
+        subseq=True
+    )
+    
+    # Crucial Matrix formatting: Because we swapped the inputs to (midi, audio), 
+    # librosa returns a warping_path where column 0 = MIDI indices and column 1 = Audio indices.
+    # We must swap the columns using np.fliplr so that the returned format remains 
+    # (audio_index, expected_midi_index). This ensures the downstream 
+    # generate_valid_mask and diagnostic plotting functions do not break.
+    wp = np.fliplr(wp)
+    
+    return wp
+
+
+def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
+    """
+    Main orchestration function for DTW alignment. 
+    1. Synthesizes a reference audio track from the MIDI sequence.
+    2. Runs DTW between the real audio and synthetic MIDI audio using Chroma CQT features.
+    3. Back-projects the MIDI temporal boundaries onto the real audio timeline.
+    4. Generates an inclusion mask that perfectly aligns with the expected notes.
+    """
+    import numpy as np
+    import librosa
+    
+    # 1. Generate multi-dimensional Chroma features for robust DTW
+    midi_chroma = get_midi_chroma(midi_notes, sr, hop_length)
+    audio_chroma = get_audio_chroma(audio_y, sr, hop_length)
+    
+    # 2. Compute DTW on Chroma
+    # wp is formatted as [audio_frame, midi_frame]
+    wp = compute_dtw_path(midi_chroma, audio_chroma)
+    
+    # 3. Convert DTW path to absolute time mapping
+    first_start = midi_notes[0]['Start_Time'] if isinstance(midi_notes[0], dict) else getattr(midi_notes[0], 'Start_Time', 0)
+    audio_times = librosa.frames_to_time(wp[:, 0], sr=sr, hop_length=hop_length)
+    midi_times = librosa.frames_to_time(wp[:, 1], sr=sr, hop_length=hop_length) + first_start
+    
+    # Ensure audio_times is strictly increasing for np.interp by picking unique audio frames
+    unique_audio_times, unique_indices = np.unique(audio_times, return_index=True)
+    unique_midi_times = midi_times[unique_indices]
+    
+    # 4. Interpolate to find exactly where every audio frame lands on the MIDI timeline
+    warped_midi_timeline = np.interp(time_array, unique_audio_times, unique_midi_times)
+    
+    # 5. Build the mask and the expected audio pitch array natively on the audio timeline
+    valid_dtw_mask = np.zeros(len(time_array), dtype=bool)
+    expected_audio_pitch = np.full(len(time_array), np.nan)
+    expected_note_index = np.full(len(time_array), "", dtype=object)
+    
+    for i, note in enumerate(midi_notes):
+        start_time = note['Start_Time'] if isinstance(note, dict) else getattr(note, 'Start_Time', 0)
+        end_time = note['End_Time'] if isinstance(note, dict) else getattr(note, 'End_Time', 0)
+        pitch = note['Pitch'] if isinstance(note, dict) else getattr(note, 'Pitch', np.nan)
+        
+        # Find which audio frames' warped timeline falls within this note's duration
+        note_mask = (warped_midi_timeline >= start_time) & (warped_midi_timeline < end_time)
+        
+        valid_dtw_mask[note_mask] = True
+        expected_audio_pitch[note_mask] = pitch
+        expected_note_index[note_mask] = f"Note {i+1}"
+        
+    return valid_dtw_mask, expected_audio_pitch, warped_midi_timeline, expected_note_index
+
+def apply_octave_folding(f0_hz, expected_midi_pitch):
+    """
+    Algorithm to mathematically fold the raw extracted pitch (f0) into the expected octave of the MIDI note.
+    This corrects algorithmic "octave errors" inherent in pYIN when tracking rich acoustic instruments, 
+    ensuring that a perfectly in-tune harmonic overtone is evaluated as the correct pitch.
+    """
+    import numpy as np
+    import librosa
+    
+    f0_midi = librosa.hz_to_midi(f0_hz)
+    valid_mask = ~np.isnan(f0_midi) & ~np.isnan(expected_midi_pitch)
+    
+    octave_offsets = np.zeros_like(f0_midi)
+    octave_offsets[valid_mask] = np.round((f0_midi[valid_mask] - expected_midi_pitch[valid_mask]) / 12.0)
+    
+    folded_f0_midi = f0_midi - (octave_offsets * 12.0)
+    folded_f0_hz = librosa.midi_to_hz(folded_f0_midi)
+    
+    return folded_f0_hz, folded_f0_midi
+
+def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline):
+    """
+    Extracts the final intonation and amplitude metrics for every note in the sequence.
+    It isolates the exact temporal island of the note using the DTW warped timeline, 
+    applies the strict pYIN/slope masks, and computes the mathematically robust Median 
+    to filter out transient attacks and glissandos.
+    """
+    import numpy as np
+    import librosa
+    
+    dtw_results = []
+    
+    # We loop through the exact sequence of true MIDI notes
+    for i, note in enumerate(midi_notes):
+        start_time = note['Start_Time'] if isinstance(note, dict) else getattr(note, 'Start_Time', 0)
+        end_time = note['End_Time'] if isinstance(note, dict) else getattr(note, 'End_Time', 0)
+        pitch = note['Pitch'] if isinstance(note, dict) else getattr(note, 'Pitch', np.nan)
+        note_name = librosa.midi_to_note(pitch) if not np.isnan(pitch) else "Rest"
+        
+        # Isolate the audio frames warped to this exact note's time boundary
+        note_mask = (warped_midi_timeline >= start_time) & (warped_midi_timeline < end_time)
+        
+        # Apply the legacy final_mask to strictly filter out transients and slides
+        strict_note_mask = note_mask & final_mask
+        
+        if np.any(strict_note_mask):
+            # Extract values
+            note_f0 = f0[strict_note_mask]
+            note_rms = rms[strict_note_mask]
+            
+            # Median f0 inside this strict, folded island
+            median_f0 = np.nanmedian(note_f0)
+            median_midi = librosa.hz_to_midi(median_f0)
+            
+            # Deviation from the TRUE MIDI pitch (cents)
+            deviation_cents = (median_midi - pitch) * 100
+            
+            # Convert deviation to Hz
+            expected_hz = librosa.midi_to_hz(pitch)
+            deviation_hz = median_f0 - expected_hz
+            
+            # RMS in dBFS
+            median_rms_dbfs = 20 * np.log10(np.nanmedian(note_rms) + 1e-10)
+            
+            # RMS in dBA
+            median_rms_dba = median_rms_dbfs + librosa.A_weighting(median_f0)
+            
+            dtw_results.append({
+                'Note_Index': i + 1,
+                'Expected_Note': note_name,
+                'Median_Detected_Pitch_Hz': median_f0,
+                'Expected_Target_Pitch_Hz': expected_hz,
+                'Deviation_Cents': deviation_cents,
+                'Deviation_Hz': deviation_hz,
+                'Median_RMS_dBFS': median_rms_dbfs,
+                'Median_RMS_dBA': median_rms_dba
+            })
+        else:
+            # Safeguard for completely empty arrays (Missed or completely filtered out)
+            dtw_results.append({
+                'Note_Index': i + 1,
+                'Expected_Note': note_name,
+                'Median_Detected_Pitch_Hz': np.nan,
+                'Expected_Target_Pitch_Hz': librosa.midi_to_hz(pitch) if not np.isnan(pitch) else np.nan,
+                'Deviation_Cents': np.nan,
+                'Deviation_Hz': np.nan,
+                'Median_RMS_dBFS': np.nan,
+                'Median_RMS_dBA': np.nan
+            })
+            
+    return dtw_results
+
+
+
+=======================================================
+FILE: midi_parser.py
+=======================================================
+
+import librosa
+
+def read_vlq(data, idx):
+    value = 0
+    while True:
+        if idx >= len(data):
+            break
+        byte = data[idx]
+        idx += 1
+        value = (value << 7) | (byte & 0x7F)
+        if not (byte & 0x80):
+            break
+    return value, idx
+
+def parse_midi(audio_file):
+    """
+    Parses a MIDI file and returns a chronological array of detected note names.
+    This works by extracting Note-On events (with velocity > 0) sequentially.
+    """
+    audio_file.seek(0)
+    data = audio_file.read()
+    
+    idx = 0
+    if data[idx:idx+4] != b'MThd':
+        return []
+    
+    idx += 4
+    header_len = int.from_bytes(data[idx:idx+4], 'big')
+    idx += 4
+    fmt = int.from_bytes(data[idx:idx+2], 'big')
+    ntracks = int.from_bytes(data[idx+2:idx+4], 'big')
+    idx += header_len
+    
+    # We will gather all note events with their absolute timing to sort them chronologically
+    # In MIDI, delta times are relative to the previous event in the same track.
+    all_notes = []
+    
+    for _ in range(ntracks):
+        if idx >= len(data): break
+        # Skip unknown chunks until we find MTrk
+        while idx < len(data) and data[idx:idx+4] != b'MTrk':
+            idx += 1
+            
+        if idx >= len(data): break
+        
+        idx += 4
+        trk_len = int.from_bytes(data[idx:idx+4], 'big')
+        idx += 4
+        end_idx = idx + trk_len
+        
+        running_status = None
+        absolute_time = 0
+        
+        while idx < end_idx:
+            # Delta time
+            delta, idx = read_vlq(data, idx)
+            absolute_time += delta
+            
+            if idx >= end_idx: break
+            
+            event_byte = data[idx]
+            if event_byte >= 0x80:
+                status = event_byte
+                idx += 1
+                if status < 0xF0:
+                    running_status = status
+            else:
+                status = running_status
+                if status is None:
+                    # Invalid MIDI state, skip byte
+                    idx += 1
+                    continue
+                    
+            if status == 0xFF:
+                # Meta event
+                meta_type = data[idx]
+                idx += 1
+                meta_len, idx = read_vlq(data, idx)
+                idx += meta_len
+            elif status in (0xF0, 0xF7):
+                # SysEx
+                sysex_len, idx = read_vlq(data, idx)
+                idx += sysex_len
+            else:
+                event_type = status >> 4
+                if event_type in (0x8, 0x9, 0xA, 0xB, 0xE):
+                    param1 = data[idx]
+                    param2 = data[idx+1]
+                    idx += 2
+                    
+                    if event_type == 0x9 and param2 > 0:
+                        # Note On with velocity > 0
+                        all_notes.append((absolute_time, param1))
+                        
+                elif event_type in (0xC, 0xD):
+                    param1 = data[idx]
+                    idx += 1
+                    
+    # Sort notes by chronological absolute time across all tracks
+    all_notes.sort(key=lambda x: x[0])
+    
+    note_sequence = [note[1] for note in all_notes]
+    
+    return [librosa.midi_to_note(n) for n in note_sequence]
+
+def parse_midi_with_timing(audio_file):
+    """
+    Parses a MIDI file and returns a list of dictionaries containing
+    'Start_Time', 'End_Time', and 'Pitch' for each note.
+    Timing is converted from ticks to seconds using a default 120 BPM tempo.
+    """
+    audio_file.seek(0)
+    data = audio_file.read()
+    
+    idx = 0
+    if data[idx:idx+4] != b'MThd':
+        return []
+    
+    idx += 4
+    header_len = int.from_bytes(data[idx:idx+4], 'big')
+    idx += 4
+    fmt = int.from_bytes(data[idx:idx+2], 'big')
+    ntracks = int.from_bytes(data[idx+2:idx+4], 'big')
+    tickdiv = int.from_bytes(data[idx+4:idx+6], 'big')
+    idx += header_len
+    
+    # Calculate seconds per tick assuming 120 BPM (500,000 microseconds per quarter note)
+    ticks_per_quarter = tickdiv if tickdiv > 0 else 480
+    seconds_per_tick = 500000 / (ticks_per_quarter * 1000000)
+    
+    midi_notes = []
+    
+    for _ in range(ntracks):
+        if idx >= len(data): break
+        while idx < len(data) and data[idx:idx+4] != b'MTrk':
+            idx += 1
+            
+        if idx >= len(data): break
+        
+        idx += 4
+        trk_len = int.from_bytes(data[idx:idx+4], 'big')
+        idx += 4
+        end_idx = idx + trk_len
+        
+        running_status = None
+        absolute_time = 0
+        
+        # Keep track of active notes to find their end times
+        active_notes = {}
+        
+        while idx < end_idx:
+            delta, idx = read_vlq(data, idx)
+            absolute_time += delta
+            
+            if idx >= end_idx: break
+            
+            event_byte = data[idx]
+            if event_byte >= 0x80:
+                status = event_byte
+                idx += 1
+                if status < 0xF0:
+                    running_status = status
+            else:
+                status = running_status
+                if status is None:
+                    idx += 1
+                    continue
+                    
+            if status == 0xFF:
+                meta_type = data[idx]
+                idx += 1
+                meta_len, idx = read_vlq(data, idx)
+                
+                # If Set Tempo (0x51), we could dynamically update seconds_per_tick here
+                if meta_type == 0x51 and meta_len == 3:
+                    tempo_usec = int.from_bytes(data[idx:idx+3], 'big')
+                    seconds_per_tick = tempo_usec / (ticks_per_quarter * 1000000)
+                    
+                idx += meta_len
+            elif status in (0xF0, 0xF7):
+                sysex_len, idx = read_vlq(data, idx)
+                idx += sysex_len
+            else:
+                event_type = status >> 4
+                if event_type in (0x8, 0x9, 0xA, 0xB, 0xE):
+                    param1 = data[idx]
+                    param2 = data[idx+1]
+                    idx += 2
+                    
+                    if event_type == 0x9 and param2 > 0:
+                        # Note On
+                        if param1 not in active_notes:
+                            active_notes[param1] = absolute_time * seconds_per_tick
+                    elif event_type == 0x8 or (event_type == 0x9 and param2 == 0):
+                        # Note Off
+                        if param1 in active_notes:
+                            start_time = active_notes.pop(param1)
+                            end_time = absolute_time * seconds_per_tick
+                            midi_notes.append({
+                                'Start_Time': start_time,
+                                'End_Time': end_time,
+                                'Pitch': param1
+                            })
+                            
+                elif event_type in (0xC, 0xD):
+                    idx += 1
+                    
+    # Sort chronologically
+    midi_notes.sort(key=lambda x: x['Start_Time'])
+    return midi_notes
+
+
+=======================================================
+FILE: pitch_engine.py
+=======================================================
+
+import librosa
+import numpy as np
+
+def get_instrument_fmin_fmax(instrument: str):
+    """
+    Returns the appropriate (fmin, fmax) frequency limits in Hz 
+    for common string instruments to mitigate incorrect pitch detections
+    (e.g., detecting harmonics or subharmonics outside the instrument's range).
+    """
+    instrument = instrument.lower()
+    if instrument == 'violin':
+        return librosa.note_to_hz('G3'), librosa.note_to_hz('C7')
+    elif instrument == 'viola':
+        return librosa.note_to_hz('C3'), librosa.note_to_hz('A6')
+    elif instrument == 'cello':
+        return librosa.note_to_hz('C2'), librosa.note_to_hz('E6')
+    else:
+        # Default fallback covering most orchestral strings
+        return librosa.note_to_hz('C2'), librosa.note_to_hz('C7')
+
+def extract_pitch_and_rms(audio_file, instrument, switch_prob):
+    """
+    Loads audio, extracts pitch using pYIN, and calculates RMS energy.
+    Ensures all arrays are exactly the same length.
+    """
+    audio_file.seek(0)
+    y, sr = librosa.load(audio_file, sr=None)
+    
+    fmin_hz, fmax_hz = get_instrument_fmin_fmax(instrument)
+    f0, voiced_flag, _ = librosa.pyin(
+        y, 
+        fmin=fmin_hz, 
+        fmax=fmax_hz, 
+        sr=sr,
+        switch_prob=switch_prob
+    )
+    
+    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
+    
+    # Ensure all arrays are exactly the same length before logical operations
+    min_len = min(len(voiced_flag), len(rms))
+    f0 = f0[:min_len]
+    voiced_flag = voiced_flag[:min_len]
+    rms = rms[:min_len]
+    
+    return y, sr, f0, voiced_flag, rms
+
+def generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope):
+    """
+    Calculates the combined boolean mask for voiced frames, amplitude threshold, 
+    and pitch stability (slope).
+    """
+    # --- Pitch Rate-of-Change (Derivative) Filter ---
+    # Convert f0 to continuous MIDI, explicitly ignoring NaNs (unvoiced frames)
+    midi = np.full_like(f0, np.nan)
+    valid_f0_mask = ~np.isnan(f0)
+    midi[valid_f0_mask] = librosa.hz_to_midi(f0[valid_f0_mask])
+    
+    # Calculate frame-to-frame absolute difference (slope). Prepend 0 to maintain array length.
+    pitch_slope = np.concatenate(([0], np.abs(np.diff(midi))))
+    
+    # Keep frames where pitch slope is stable OR where the transition involves a NaN (the very first frame of a note)
+    slope_mask = (pitch_slope <= max_pitch_slope) | np.isnan(pitch_slope)
+
+    # Combine all condition masks: Must be voiced AND loud enough AND vertically stable
+    combined_mask = voiced_flag & (rms > rms_threshold) & slope_mask
+    return combined_mask
+
+def apply_duration_filter(combined_mask, min_frames):
+    """
+    Searches for continuous blocks of 'True' in the mask. 
+    Discards any blocks shorter than 'min_frames' and returns the final mask.
+    """
+    final_mask = np.copy(combined_mask)
+    padded_mask = np.concatenate(([False], final_mask, [False]))
+    changes = np.diff(padded_mask.astype(int))
+    starts = np.where(changes == 1)[0]
+    ends = np.where(changes == -1)[0]
+    
+    for start, end in zip(starts, ends):
+        duration = end - start
+        if duration < min_frames:
+            # Strip away the fragment because it didn't last long enough
+            final_mask[start:end] = False
+            
+    return final_mask
+
+def calculate_island_metrics(f0, final_mask):
+    """
+    Identifies the final isolated note islands after duration filtering,
+    applies the Locked Target Rule (median MIDI value), and computes deviations.
+    """
+    padded_mask = np.concatenate(([False], final_mask, [False]))
+    changes = np.diff(padded_mask.astype(int))
+    starts = np.where(changes == 1)[0]
+    ends = np.where(changes == -1)[0]
+
+    deviation_cents_list = []
+    deviation_hz_list = []
+    detected_notes_sequence = []
+    
+    f0_target = np.full_like(f0, np.nan)
+    full_deviation = np.full_like(f0, np.nan)
+    
+    for start, end in zip(starts, ends):
+        island_f0 = f0[start:end]
+        valid_mask = ~np.isnan(island_f0)
+        valid_island_f0 = island_f0[valid_mask]
+        
+        if len(valid_island_f0) > 0:
+            continuous_midi = librosa.hz_to_midi(valid_island_f0)
+            
+            # --- Locked Target Rule ---
+            island_median_midi = np.median(continuous_midi)
+            locked_target_note = np.round(island_median_midi)
+            
+            note_name = librosa.midi_to_note(locked_target_note)
+            detected_notes_sequence.append(note_name)
+            
+            island_deviation = (continuous_midi - locked_target_note) * 100
+            deviation_cents_list.extend(island_deviation)
+            
+            target_hz = librosa.midi_to_hz(locked_target_note)
+            island_deviation_hz = valid_island_f0 - target_hz
+            deviation_hz_list.extend(island_deviation_hz)
+            
+            island_indices = np.arange(start, end)
+            valid_full_indices = island_indices[valid_mask]
+            
+            f0_target[valid_full_indices] = target_hz
+            full_deviation[valid_full_indices] = island_deviation
+            
+    return {
+        'starts': starts,
+        'deviation_cents_list': deviation_cents_list,
+        'deviation_hz_list': deviation_hz_list,
+        'detected_notes_sequence': detected_notes_sequence,
+        'f0_target': f0_target,
+        'full_deviation': full_deviation
+    }
+
+def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_frames=10, max_pitch_slope=3.0):
+    """
+    Core engine for intonation analysis.
+    Accepts pre-extracted pYIN pitch arrays and orchestrates masking, filtering, and metric calculation.
+    """
+
+    # 2. Filtering
+    combined_mask = generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope)
+    final_mask = apply_duration_filter(combined_mask, min_frames)
+    
+    # 3. Metrics Calculation
+    metrics = calculate_island_metrics(f0, final_mask)
+    
+    # 4. Compilation
+    results = {
+        'y': y,
+        'f0': f0,
+        'sr': sr,
+        'rms': rms,
+        'final_mask': final_mask,
+        'f0_target': metrics['f0_target'],
+        'full_deviation': metrics['full_deviation'],
+        'deviation_cents_list': metrics['deviation_cents_list'],
+        'deviation_hz_list': metrics['deviation_hz_list'],
+        'detected_notes_sequence': metrics['detected_notes_sequence'],
+        'success': len(metrics['deviation_cents_list']) > 0
+    }
+    
+    if results['success']:
+        deviation_cents = np.array(metrics['deviation_cents_list'])
+        deviation_hz = np.array(metrics['deviation_hz_list'])
+        results['mean_dev'] = np.mean(deviation_cents)
+        results['std_dev'] = np.std(deviation_cents)
+        results['mean_dev_hz'] = np.mean(deviation_hz)
+        results['std_dev_hz'] = np.std(deviation_hz)
+        results['frame_count'] = len(deviation_cents)
+        results['note_count'] = len(metrics['starts'])
+        
+    return results
+
+
+=======================================================
+FILE: ui_components.py
+=======================================================
+
+"""
+ui_components.py
+----------------
+Modular definitions for the Streamlit user interface.
+This module extracts the complex UI rendering logic from the main application loop.
+It handles sidebar parameter configurations (with scientific presets) and renders the 
+interactive DataFrames for both DTW and Legacy metrics.
+"""
+import streamlit as st
+import numpy as np
+import pandas as pd
+from itertools import zip_longest
+
+def render_sidebar_parameters():
+    """
+    Renders the sidebar UI elements and returns the selected parameters.
+    """
+    st.sidebar.header("Pitch Analyser Parameters")
+    
+    preset = st.sidebar.selectbox(
+        "Analysis Profile",
+        ["Custom (Manual Tuning)", "Rapid / Virtuosic", "Slow / Legato"],
+        help="Select a standardized preset to lock parameters across participants, ensuring experimental consistency."
+    )
+    
+    if preset == "Rapid / Virtuosic":
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 1, 0.20
+        disabled = True
+    elif preset == "Slow / Legato":
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.02, 10, 0.10
+        disabled = True
+    else:
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 10, 0.10
+        disabled = False
+
+    instrument = st.sidebar.selectbox(
+        "Select Instrument",
+        ["Violin", "Viola", "Cello"],
+        help="Sets the appropriate frequency detection range for the instrument."
+    )
+
+    switch_prob = st.sidebar.number_input(
+        "Switch Probability (pYIN)", 
+        min_value=0.001, 
+        max_value=0.050, 
+        value=def_switch, 
+        step=0.001,
+        format="%.3f",
+        disabled=disabled,
+        help="Penalizes rapid toggling between voiced/unvoiced states. Lower values favor longer sustained notes. You can manually enter the value if needed."
+    )
+
+    rms_threshold = st.sidebar.number_input(
+        "RMS Amplitude Threshold", 
+        min_value=0.0, 
+        max_value=1.0, 
+        value=def_rms, 
+        step=0.005,
+        disabled=disabled,
+        help="Minimum RMS energy required for a frame to be considered active. Filters out background noise and quiet transients."
+    )
+
+    min_frames = st.sidebar.number_input(
+        "Minimum Sustain Duration (frames)", 
+        min_value=1, 
+        max_value=100, 
+        value=def_frames,
+        disabled=disabled,
+        help="Minimum continuous frames a note must sustain to be included in the analysis. Discards short blips."
+    )
+
+    max_pitch_slope = st.sidebar.slider(
+        "Maximum Pitch Slope", 
+        min_value=0.05, 
+        max_value=0.50, 
+        value=def_slope, 
+        step=0.01,
+        disabled=disabled,
+        help="Maximum allowed frame-to-frame pitch change (semitones) to strictly isolate horizontal steady-state notes. Discards glissandos and slides."
+    )
+    
+    return instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope
+
+def get_val(res_dict, key):
+    """Helper to safely extract a value from the results dictionary."""
+    return res_dict[key] if res_dict and key in res_dict else np.nan
+
+def render_results_table(res_unp, res_plg, unp_ok, plg_ok):
+    """
+    Renders the Legacy Island Intonation Results table.
+    """
+    st.subheader("Legacy Island Intonation Results")
+    st.write("These metrics are generated using the legacy pitch analyser, which uses the slope filter to strictly isolate steady state notes and compares them against the nearest semitone target.")
+    
+    mean_dev_unp = get_val(res_unp, 'mean_dev')
+    mean_dev_plg = get_val(res_plg, 'mean_dev')
+    mean_dev_hz_unp = get_val(res_unp, 'mean_dev_hz')
+    mean_dev_hz_plg = get_val(res_plg, 'mean_dev_hz')
+    mean_dbfs_unp = get_val(res_unp, 'mean_dbfs')
+    mean_dbfs_plg = get_val(res_plg, 'mean_dbfs')
+    mean_dba_unp = get_val(res_unp, 'mean_dba')
+    mean_dba_plg = get_val(res_plg, 'mean_dba')
+    
+    note_count_unp = get_val(res_unp, 'note_count')
+    note_count_plg = get_val(res_plg, 'note_count')
+
+    # Calculate Delta if both exist, otherwise NaN
+    delta_cents = mean_dev_unp - mean_dev_plg if unp_ok and plg_ok else np.nan
+    delta_hz = mean_dev_hz_unp - mean_dev_hz_plg if unp_ok and plg_ok else np.nan
+    delta_dbfs = mean_dbfs_unp - mean_dbfs_plg if unp_ok and plg_ok else np.nan
+    delta_dba = mean_dba_unp - mean_dba_plg if unp_ok and plg_ok else np.nan
+    delta_note_count = note_count_unp - note_count_plg if unp_ok and plg_ok else np.nan
+    
+    data = {
+        "Condition": ["Unplugged", "Plugged", "Delta (Unplugged - Plugged)"],
+        "Mean Deviation (Hz)": [mean_dev_hz_unp, mean_dev_hz_plg, delta_hz],
+        "Mean Deviation (cents)": [mean_dev_unp, mean_dev_plg, delta_cents],
+        "Mean RMS (dBFS)": [mean_dbfs_unp, mean_dbfs_plg, delta_dbfs],
+        "Mean RMS (dBA)": [mean_dba_unp, mean_dba_plg, delta_dba],
+        "Detected Pitches (count)": [note_count_unp, note_count_plg, delta_note_count]
+    }
+    df = pd.DataFrame(data)
+    df.set_index("Condition", inplace=True)
+    
+    st.dataframe(df.style.format("{:.2f}", na_rep=""), width="stretch")
+
+    csv = df.to_csv().encode('utf-8')
+    st.download_button(
+        label="Download Legacy Data as CSV",
+        data=csv,
+        file_name='intonation_comparison_legacy.csv',
+        mime='text/csv',
+    )
+    
+    msg = "Successfully analyzed"
+    if unp_ok:
+        msg += f" {res_unp['frame_count']} frames (Unplugged)"
+    if unp_ok and plg_ok:
+        msg += " and"
+    if plg_ok:
+        msg += f" {res_plg['frame_count']} frames (Plugged)"
+    st.success(msg + ".")
+
+def render_sequence_comparison(midi_seq, unp_seq, plg_seq):
+    """
+    Renders the Note Sequence Comparison table.
+    """
+    st.subheader("Note Sequence Comparison")
+    
+    seq_data = {}
+    if midi_seq:
+        seq_data["MIDI Reference Sequence"] = midi_seq
+    if unp_seq:
+        seq_data["Detected Sequence (Unplugged)"] = unp_seq
+    if plg_seq:
+        seq_data["Detected Sequence (Plugged)"] = plg_seq
+        
+    if seq_data:
+        padded_rows = list(zip_longest(*seq_data.values(), fillvalue=""))
+        padded_columns = {col: [row[i] for row in padded_rows] for i, col in enumerate(seq_data.keys())}
+        
+        df_seq = pd.DataFrame(padded_columns)
+        df_seq.index = df_seq.index + 1
+        df_seq.index.name = "Note Index"
+        
+        st.dataframe(df_seq, width="stretch")
+        
+        csv_seq = df_seq.to_csv().encode('utf-8')
+        st.download_button(
+            label="Download Sequence Data as CSV",
+            data=csv_seq,
+            file_name='note_sequence_comparison.csv',
+            mime='text/csv',
+        )
+    else:
+        st.info("Upload an audio file or MIDI reference to see the sequence comparison.")
+
+def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
+    """
+    Renders the DTW Metric Table which explicitly maps detected audio notes to the MIDI score.
+    """
+    st.subheader("DTW Note-by-Note Intonation Metrics")
+    st.caption("Use the checkboxes in the **Include** column to manually exclude corrupt notes (e.g. double-stops or tracking errors) from the Overall Summary calculation below. Unchecking a row will dynamically update the means.")
+    st.write("This table extracts the exact median frequency and deviation from the DTW-warped timeline, strictly bound to the MIDI note expectations.")
+    
+    if not dtw_metrics_unp and not dtw_metrics_plg:
+        st.info("No DTW metrics available to display.")
+        return
+        
+    df_list = []
+    
+    # Use the available array to dictate the structure since both depend entirely on the MIDI
+    reference_metrics = dtw_metrics_unp if dtw_metrics_unp else dtw_metrics_plg
+    
+    for i, ref_note in enumerate(reference_metrics):
+        row = {
+            "Note Index": ref_note["Note_Index"],
+            "Expected Note": ref_note["Expected_Note"],
+            "Target Freq (Hz)": ref_note["Expected_Target_Pitch_Hz"],
+        }
+        
+        dev_hz_unp = np.nan
+        dev_hz_plg = np.nan
+        
+        if dtw_metrics_unp and i < len(dtw_metrics_unp):
+            unp_note = dtw_metrics_unp[i]
+            row["Unplugged Dev (Hz)"] = unp_note["Deviation_Hz"]
+            row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
+            dev_hz_unp = unp_note["Deviation_Hz"]
+            
+        if dtw_metrics_plg and i < len(dtw_metrics_plg):
+            plg_note = dtw_metrics_plg[i]
+            row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
+            row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
+            dev_hz_plg = plg_note["Deviation_Hz"]
+            
+        if dtw_metrics_unp and dtw_metrics_plg:
+            row["Delta Dev (Unplugged - Plugged)"] = dev_hz_unp - dev_hz_plg
+            
+        df_list.append(row)
+        
+    df = pd.DataFrame(df_list)
+    df.set_index("Note Index", inplace=True)
+    
+    df.insert(0, "Include", True)
+    
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    disabled_cols = df.columns.drop("Include").tolist()
+    
+    edited_df = st.data_editor(
+        df.style.format("{:.2f}", subset=numeric_cols, na_rep="Missed"),
+        column_config={
+            "Include": st.column_config.CheckboxColumn(
+                "Include",
+                help="Select which notes to include in the overall summary means",
+                default=True,
+            )
+        },
+        disabled=disabled_cols,
+        width="stretch",
+        use_container_width=True
+    )
+    
+    excluded_indices = edited_df[~edited_df["Include"]].index.tolist()
+    
+    csv = edited_df.drop(columns=["Include"]).to_csv().encode('utf-8')
+    st.download_button(
+        label="Download DTW Metrics as CSV",
+        data=csv,
+        file_name='dtw_metrics_comparison.csv',
+        mime='text/csv',
+    )
+    
+    return excluded_indices
+
+def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=None):
+    """
+    Renders an overall performance summary table aggregating the note-by-note DTW metrics.
+    Includes Delta calculation between Unplugged and Plugged conditions.
+    """
+    if not dtw_metrics_unp and not dtw_metrics_plg:
+        return
+        
+    if excluded_indices is None:
+        excluded_indices = []
+        
+    st.write("**Overall DTW Performance Summary**")
+    
+    summary_data = []
+    
+    def calculate_means(metrics):
+        if not metrics:
+            return {
+                "mean RMS amplitude (dB FS)": np.nan, 
+                "mean RMS amplitude (dB A)": np.nan, 
+                "mean intonation deviation (Hz)": np.nan, 
+                "mean intonation deviation (cents)": np.nan
+            }
+            
+        filtered_metrics = [m for m in metrics if m["Note_Index"] not in excluded_indices]
+        
+        if not filtered_metrics:
+            return {
+                "mean RMS amplitude (dB FS)": np.nan, 
+                "mean RMS amplitude (dB A)": np.nan, 
+                "mean intonation deviation (Hz)": np.nan, 
+                "mean intonation deviation (cents)": np.nan
+            }
+            
+        df = pd.DataFrame(filtered_metrics)
+        return {
+            "mean RMS amplitude (dB FS)": df["Median_RMS_dBFS"].mean(),
+            "mean RMS amplitude (dB A)": df["Median_RMS_dBA"].mean(),
+            "mean intonation deviation (Hz)": df["Deviation_Hz"].mean(),
+            "mean intonation deviation (cents)": df["Deviation_Cents"].mean(),
+        }
+        
+    unp_means = calculate_means(dtw_metrics_unp)
+    plg_means = calculate_means(dtw_metrics_plg)
+    
+    unp_means["Condition"] = "Unplugged"
+    plg_means["Condition"] = "Plugged"
+    
+    summary_data.append(unp_means)
+    summary_data.append(plg_means)
+    
+    delta = {
+        "Condition": "Delta (Unplugged - Plugged)",
+        "mean RMS amplitude (dB FS)": unp_means["mean RMS amplitude (dB FS)"] - plg_means["mean RMS amplitude (dB FS)"],
+        "mean RMS amplitude (dB A)": unp_means["mean RMS amplitude (dB A)"] - plg_means["mean RMS amplitude (dB A)"],
+        "mean intonation deviation (Hz)": unp_means["mean intonation deviation (Hz)"] - plg_means["mean intonation deviation (Hz)"],
+        "mean intonation deviation (cents)": unp_means["mean intonation deviation (cents)"] - plg_means["mean intonation deviation (cents)"]
+    }
+    summary_data.append(delta)
+    
+    df_summary = pd.DataFrame(summary_data)
+    df_summary.set_index("Condition", inplace=True)
+    
+    numeric_cols = df_summary.select_dtypes(include=[np.number]).columns
+    st.dataframe(df_summary.style.format("{:.2f}", subset=numeric_cols, na_rep="N/A"), width="stretch")
+    
+    csv = df_summary.to_csv().encode('utf-8')
+    st.download_button(
+        label="Download DTW Summary as CSV",
+        data=csv,
+        file_name='dtw_summary.csv',
+        mime='text/csv',
+    )
+
+
+
+=======================================================
+FILE: visualization.py
+=======================================================
+
+"""
+visualization.py
+----------------
+Dedicated rendering engine for all interactive data visualizations.
+This module leverages Plotly Graph Objects to draw complex, multi-layered traces 
+for both the Legacy sequential pitch tracks and the advanced DTW Diagnostic overlays.
+"""
+import streamlit as st
+import numpy as np
+import librosa
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+
+def render_plotly_fig(res_dict, title_suffix, show_raw, show_steady, show_target):
+    """
+    Renders an interactive Plotly graph of the pitch tracks vs time.
+    """
+    f0 = res_dict['f0']
+    final_mask = res_dict['final_mask']
+    f0_target = res_dict['f0_target']
+    full_deviation = res_dict['full_deviation']
+    sr = res_dict['sr']
+    
+    times = librosa.times_like(f0, sr=sr, hop_length=512)
+    f0_steady = np.full_like(f0, np.nan)
+    f0_steady[final_mask] = f0[final_mask]
+    
+    hover_text = []
+    for d_pitch, t_pitch, dev in zip(f0_steady, f0_target, full_deviation):
+        if not np.isnan(d_pitch):
+            hover_text.append(f"Detected: {d_pitch:.1f} Hz<br>Target: {t_pitch:.1f} Hz<br>Dev: {dev:.1f} ¢")
+        else:
+            hover_text.append("")
+            
+    fig = go.Figure()
+    
+    if show_raw:
+        fig.add_trace(go.Scatter(
+            x=times, y=f0, mode='lines', name='Raw pYIN f0 (voiced)',
+            line=dict(color='rgba(128, 128, 128, 0.3)', width=1), hoverinfo='skip'
+        ))
+    
+    if show_steady:
+        fig.add_trace(go.Scatter(
+            x=times, y=f0_steady, mode='lines', name='Isolated Steady Notes',
+            line=dict(color='blue', width=2), text=hover_text, hovertemplate="%{text}<extra></extra>"
+        ))
+    
+    if show_target:
+        fig.add_trace(go.Scatter(
+            x=times, y=f0_target, mode='lines', name='Target Pitch (Nearest Semitone)',
+            line=dict(color='red', width=2, dash='dash'), hovertemplate="Target: %{y:.1f} Hz<extra></extra>"
+        ))
+    
+    max_y = np.nanmax(f0) if not np.all(np.isnan(f0)) else 2000
+    tick_vals = np.arange(0, max_y + 500, 500)
+    tick_text = [f"{v/1000:g}kHz" for v in tick_vals]
+    
+    fig.update_layout(
+        title=f"Pitch Track vs Isolated Steady-State Notes ({title_suffix})",
+        xaxis_title="Time (seconds)",
+        yaxis_title="Frequency",
+        yaxis=dict(tickmode='array', tickvals=tick_vals, ticktext=tick_text, range=[0, max_y + 200]),
+        hovermode="x unified",
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
+    return fig
+
+def render_pitch_track_visualizations(unp_ok, plg_ok, res_unp, res_plg):
+    """
+    Sets up the Streamlit UI for the Plotly graphs and renders them based on checkboxes.
+    """
+    st.subheader("Pitch Track Visualizations")
+    
+    col_t1, col_t2, col_t3 = st.columns(3)
+    show_raw = col_t1.checkbox("Show Raw pYIN f0 (voiced)", value=True)
+    show_steady = col_t2.checkbox("Show Isolated Steady Notes", value=True)
+    show_target = col_t3.checkbox("Show Target Pitch", value=True)
+
+    if unp_ok and plg_ok:
+        tab1, tab2 = st.tabs(["Unplugged Recording", "Plugged Recording"])
+        with tab1:
+            fig_unp = render_plotly_fig(res_unp, "Unplugged", show_raw, show_steady, show_target)
+            st.plotly_chart(fig_unp, use_container_width=True)
+        with tab2:
+            fig_plg = render_plotly_fig(res_plg, "Plugged", show_raw, show_steady, show_target)
+            st.plotly_chart(fig_plg, use_container_width=True)
+    elif unp_ok:
+        fig_unp = render_plotly_fig(res_unp, "Unplugged", show_raw, show_steady, show_target)
+        st.plotly_chart(fig_unp, use_container_width=True)
+    elif plg_ok:
+        fig_plg = render_plotly_fig(res_plg, "Plugged", show_raw, show_steady, show_target)
+        st.plotly_chart(fig_plg, use_container_width=True)
+
+
+def plot_alignment_diagnostics(time_array, f0_midi, expected_audio_pitch, valid_dtw_mask, expected_note_index=None, show_target=True, show_extraneous=True, show_matched=True):
+    """
+    Renders a diagnostic plot showing the DTW expected pitch path natively 
+    overlaid on the detected pYIN pitch curve using Plotly.
+    Matched pitches (inside mask) are Blue, extraneous pitches (outside mask) are Yellow.
+    Allows toggling individual plot elements and provides interactive hover tooltips.
+    """
+    import plotly.graph_objects as go
+    import librosa
+    
+    fig = go.Figure()
+    
+    f0_hz = librosa.midi_to_hz(f0_midi)
+    expected_hz = librosa.midi_to_hz(expected_audio_pitch)
+    
+    expected_notes = [librosa.midi_to_note(p) if not np.isnan(p) else "Rest" for p in expected_audio_pitch]
+    if expected_note_index is not None:
+        combined_notes = [f"{idx} ({note})" if idx != "" else note for idx, note in zip(expected_note_index, expected_notes)]
+    else:
+        combined_notes = expected_notes
+        
+    hover_expected_hz = [f"{hz:.2f} Hz" if not np.isnan(hz) else "N/A" for hz in expected_hz]
+    hover_performed_hz = [f"{hz:.2f} Hz" if not np.isnan(hz) else "N/A" for hz in f0_hz]
+    
+    customdata = np.stack((combined_notes, hover_expected_hz, hover_performed_hz), axis=-1)
+    
+    hover_template = (
+        "Time: %{x:.2f}s<br>"
+        "Expected Note: %{customdata[0]}<br>"
+        "Expected Freq: %{customdata[1]}<br>"
+        "Performed Freq: %{customdata[2]}"
+        "<extra></extra>"
+    )
+    
+    # 1. Plot the continuous expected MIDI pitch (the grey staircase)
+    if show_target:
+        fig.add_trace(go.Scatter(
+            x=time_array,
+            y=expected_audio_pitch,
+            mode='lines',
+            name='DTW Bridge Target',
+            line=dict(color='grey', width=4),
+            opacity=0.5,
+            hovertemplate=hover_template,
+            customdata=customdata
+        ))
+    
+    # 2. Plot the raw pYIN f0. We break it into two groups based on the DTW mask.
+    # Group A: Extraneous notes (outside the DTW mask). Yellow.
+    if show_extraneous:
+        extraneous_f0 = np.copy(f0_midi)
+        extraneous_f0[valid_dtw_mask] = np.nan
+        
+        # Break the line at any massive instantaneous jumps (> 6 semitones per frame) 
+        # to prevent Plotly from drawing artificial vertical cliffs between disconnected pitch islands.
+        pitch_slope_ext = np.concatenate(([0], np.abs(np.diff(extraneous_f0))))
+        extraneous_f0[pitch_slope_ext > 6.0] = np.nan
+        
+        fig.add_trace(go.Scatter(
+            x=time_array,
+            y=extraneous_f0,
+            mode='lines',
+            name='Extraneous F0',
+            line=dict(color='#ffc107', width=2),
+            opacity=0.8,
+            hovertemplate=hover_template,
+            customdata=customdata
+        ))
+    
+    # Group B: Matched notes (inside the DTW mask). Blue.
+    if show_matched:
+        matched_f0 = np.copy(f0_midi)
+        matched_f0[~valid_dtw_mask] = np.nan
+        fig.add_trace(go.Scatter(
+            x=time_array,
+            y=matched_f0,
+            mode='lines',
+            name='Matched F0',
+            line=dict(color='#1f77b4', width=2),
+            opacity=0.9,
+            hovertemplate=hover_template,
+            customdata=customdata
+        ))
+
+    valid_data = f0_midi[~np.isnan(f0_midi)]
+    y_range = [np.min(valid_data) - 2, np.max(valid_data) + 2] if len(valid_data) > 0 else None
+
+    fig.update_layout(
+        title="Absolute-Time Bridge Diagnostics",
+        xaxis_title="Time (s)",
+        yaxis_title="Pitch (MIDI)",
+        yaxis=dict(range=y_range) if y_range else dict(),
+        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+        margin=dict(l=20, r=20, t=40, b=20),
+        hovermode="closest"
+    )
+    
+    return fig

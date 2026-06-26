@@ -1,3 +1,10 @@
+"""
+visualization.py
+----------------
+Dedicated rendering engine for all interactive data visualizations.
+This module leverages Plotly Graph Objects to draw complex, multi-layered traces 
+for both the Legacy sequential pitch tracks and the advanced DTW Diagnostic overlays.
+"""
 import streamlit as st
 import numpy as np
 import librosa

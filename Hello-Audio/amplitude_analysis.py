@@ -1,3 +1,11 @@
+"""
+amplitude_analysis.py
+---------------------
+Core engine for calculating acoustic intensity metrics.
+This module processes raw audio signals to extract global Root Mean Square (RMS) energy.
+It performs both absolute digital scaling (dBFS) and psychoacoustic human-hearing 
+perceptual weighting (dBA) across the entire recording.
+"""
 import librosa
 import numpy as np
 

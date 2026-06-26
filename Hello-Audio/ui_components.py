@@ -1,3 +1,11 @@
+"""
+ui_components.py
+----------------
+Modular definitions for the Streamlit user interface.
+This module extracts the complex UI rendering logic from the main application loop.
+It handles sidebar parameter configurations (with scientific presets) and renders the 
+interactive DataFrames for both DTW and Legacy metrics.
+"""
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -61,17 +69,28 @@ def render_sidebar_parameters():
         help="Minimum continuous frames a note must sustain to be included in the analysis. Discards short blips."
     )
 
-    max_pitch_slope = st.sidebar.slider(
-        "Maximum Pitch Slope", 
-        min_value=0.05, 
-        max_value=0.50, 
-        value=def_slope, 
-        step=0.01,
-        disabled=disabled,
-        help="Maximum allowed frame-to-frame pitch change (semitones) to strictly isolate horizontal steady-state notes. Discards glissandos and slides."
-    )
+    # ==========================================
+    # Logic Component Toggles (Demonstration Mode)
+    # ==========================================
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Logic Component Toggles")
+    st.sidebar.caption("Disable components to demonstrate failure modes for the technical manual.")
     
-    return instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope
+    enable_freq_limits = st.sidebar.checkbox("Enable Instrument Freq Limits", value=True, help="Limit pitch detection to range of instrument.")
+    enable_slope_filter = st.sidebar.checkbox("Enable Pitch Slope Filter", value=True, help="Discard frames where pitch changes too rapidly.")
+    enable_duration_filter = st.sidebar.checkbox("Enable Sustain Duration Filter", value=True, help="Discard pitch islands that are too short.")
+    enable_locked_target = st.sidebar.checkbox("Enable Locked Target Rule", value=True, help="Lock legacy notes to their median semitone.")
+    enable_octave_folding = st.sidebar.checkbox("Enable Octave Folding", value=True, help="Fold tracking errors to target octave in DTW.")
+    
+    toggles = {
+        "freq_limits": enable_freq_limits,
+        "slope_filter": enable_slope_filter,
+        "duration_filter": enable_duration_filter,
+        "locked_target": enable_locked_target,
+        "octave_folding": enable_octave_folding
+    }
+    
+    return instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles
 
 def get_val(res_dict, key):
     """Helper to safely extract a value from the results dictionary."""
