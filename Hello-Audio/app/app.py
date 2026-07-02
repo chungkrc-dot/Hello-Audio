@@ -7,13 +7,17 @@ and conditionally routes audio data to either the advanced DTW Alignment Engine
 (if a MIDI reference is provided) or the Legacy Pitch Analysis Engine.
 """
 import streamlit as st
-from pitch_engine import analyze_intonation
-from amplitude_analysis import analyze_amplitude
-from midi_parser import parse_midi, parse_midi_with_timing
+import sys
+import os
 
-# Import our new modular UI and visualization components
-from ui_components import render_sidebar_parameters, render_results_table, render_sequence_comparison
-from visualization import render_pitch_track_visualizations
+# Ensure the root directory is on the path so we can import from src/ and app/
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.pitch_engine import analyze_intonation
+from src.amplitude_analysis import analyze_amplitude
+from src.midi_parser import parse_midi, parse_midi_with_timing
+from ui_components import render_sidebar_parameters, render_results_table, render_sequence_comparison, render_dtw_results_table, render_dtw_summary_table
+from src.visualization import render_pitch_track_visualizations
 
 def main():
     st.set_page_config(page_title="Hello-Audio", layout="wide")

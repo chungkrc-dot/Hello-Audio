@@ -69,6 +69,16 @@ def render_sidebar_parameters():
         help="Minimum continuous frames a note must sustain to be included in the analysis. Discards short blips."
     )
 
+    max_pitch_slope = st.sidebar.number_input(
+        "Maximum Pitch Slope (semitones)", 
+        min_value=0.01, 
+        max_value=1.00, 
+        value=def_slope, 
+        step=0.01,
+        disabled=disabled,
+        help="Discards frames where the frame-to-frame pitch jump exceeds this limit. Filters out transients and glissandi."
+    )
+
     # ==========================================
     # Logic Component Toggles (Demonstration Mode)
     # ==========================================
@@ -194,11 +204,18 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
     st.caption("Use the checkboxes in the **Include** column to manually exclude corrupt notes (e.g. double-stops or tracking errors) from the Overall Summary calculation below. Unchecking a row will dynamically update the means.")
     st.write("This table extracts the exact median frequency and deviation from the DTW-warped timeline, strictly bound to the MIDI note expectations.")
     
+    auto_exclude = st.checkbox(
+        "Auto-exclude gross tracking errors (>1 semitone deviation)",
+        value=True,
+        help="Unchecks notes where deviation exceeds 100 cents. These are typically algorithmic tracking errors (e.g., tracking a sympathetic string resonance) rather than human intonation errors."
+    )
+    
     if not dtw_metrics_unp and not dtw_metrics_plg:
         st.info("No DTW metrics available to display.")
         return
         
     df_list = []
+    include_list = []
     
     # Use the available array to dictate the structure since both depend entirely on the MIDI
     reference_metrics = dtw_metrics_unp if dtw_metrics_unp else dtw_metrics_plg
@@ -212,6 +229,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
         
         dev_hz_unp = np.nan
         dev_hz_plg = np.nan
+        include_val = True
         
         if dtw_metrics_unp and i < len(dtw_metrics_unp):
             unp_note = dtw_metrics_unp[i]
@@ -219,27 +237,37 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
             row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
             dev_hz_unp = unp_note["Deviation_Hz"]
             
+            if auto_exclude and abs(unp_note["Deviation_Cents"]) > 100:
+                include_val = False
+            
         if dtw_metrics_plg and i < len(dtw_metrics_plg):
             plg_note = dtw_metrics_plg[i]
             row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
             row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
             dev_hz_plg = plg_note["Deviation_Hz"]
             
+            if auto_exclude and abs(plg_note["Deviation_Cents"]) > 100:
+                include_val = False
+            
         if dtw_metrics_unp and dtw_metrics_plg:
             row["Delta Dev (Unplugged - Plugged)"] = dev_hz_unp - dev_hz_plg
             
         df_list.append(row)
+        include_list.append(include_val)
         
     df = pd.DataFrame(df_list)
     df.set_index("Note Index", inplace=True)
     
-    df.insert(0, "Include", True)
+    df.insert(0, "Include", include_list)
     
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     disabled_cols = df.columns.drop("Include").tolist()
     
+    styled_df = df.style.format("{:.2f}", subset=numeric_cols, na_rep="Missed")\
+                        .highlight_null(color='rgba(255, 75, 75, 0.3)')
+    
     edited_df = st.data_editor(
-        df.style.format("{:.2f}", subset=numeric_cols, na_rep="Missed"),
+        styled_df,
         column_config={
             "Include": st.column_config.CheckboxColumn(
                 "Include",
@@ -282,16 +310,28 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     def calculate_means(metrics):
         if not metrics:
             return {
+                "Notes Detected (%)": np.nan,
+                "Notes Included (%)": np.nan,
                 "mean RMS amplitude (dB FS)": np.nan, 
                 "mean RMS amplitude (dB A)": np.nan, 
                 "mean intonation deviation (Hz)": np.nan, 
                 "mean intonation deviation (cents)": np.nan
             }
             
+        total_expected = len(metrics)
+        detected_count = sum(1 for m in metrics if not pd.isna(m["Deviation_Cents"]))
+        
         filtered_metrics = [m for m in metrics if m["Note_Index"] not in excluded_indices]
+        
+        included_count = sum(1 for m in filtered_metrics if not pd.isna(m["Deviation_Cents"]))
+        
+        pct_detected = (detected_count / total_expected * 100) if total_expected > 0 else np.nan
+        pct_included = (included_count / detected_count * 100) if detected_count > 0 else np.nan
         
         if not filtered_metrics:
             return {
+                "Notes Detected (%)": pct_detected,
+                "Notes Included (%)": pct_included,
                 "mean RMS amplitude (dB FS)": np.nan, 
                 "mean RMS amplitude (dB A)": np.nan, 
                 "mean intonation deviation (Hz)": np.nan, 
@@ -300,6 +340,8 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
             
         df = pd.DataFrame(filtered_metrics)
         return {
+            "Notes Detected (%)": pct_detected,
+            "Notes Included (%)": pct_included,
             "mean RMS amplitude (dB FS)": df["Median_RMS_dBFS"].mean(),
             "mean RMS amplitude (dB A)": df["Median_RMS_dBA"].mean(),
             "mean intonation deviation (Hz)": df["Deviation_Hz"].mean(),
@@ -317,6 +359,8 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     
     delta = {
         "Condition": "Delta (Unplugged - Plugged)",
+        "Notes Detected (%)": unp_means["Notes Detected (%)"] - plg_means["Notes Detected (%)"],
+        "Notes Included (%)": unp_means["Notes Included (%)"] - plg_means["Notes Included (%)"],
         "mean RMS amplitude (dB FS)": unp_means["mean RMS amplitude (dB FS)"] - plg_means["mean RMS amplitude (dB FS)"],
         "mean RMS amplitude (dB A)": unp_means["mean RMS amplitude (dB A)"] - plg_means["mean RMS amplitude (dB A)"],
         "mean intonation deviation (Hz)": unp_means["mean intonation deviation (Hz)"] - plg_means["mean intonation deviation (Hz)"],
@@ -337,4 +381,8 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
         file_name='dtw_summary.csv',
         mime='text/csv',
     )
+    
+    st.caption("**Notes Detected (%)**: The percentage of expected MIDI notes that were successfully extracted by the pitch tracking algorithm.\n\n"
+               "**Notes Included (%)**: The percentage of *detected notes* that successfully passed all algorithmic tracking filters (and manual exclusions) to contribute to the mean deviation calculations above.")
+
 

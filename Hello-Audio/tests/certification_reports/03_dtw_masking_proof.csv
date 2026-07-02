@@ -1,0 +1,2 @@
+Note_Index,Expected_Note,Median_Detected_Pitch_Hz,Expected_Target_Pitch_Hz,Deviation_Cents,Deviation_Hz,Median_RMS_dBFS,Median_RMS_dBA
+1,A4,440.0,440.0,0.0,0.0,-19.99999999131411,-24.094556201903277

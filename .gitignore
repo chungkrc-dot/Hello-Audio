@@ -19,3 +19,6 @@ env/
 
 # Streamlit config (optional)
 .streamlit/secrets.toml
+
+# Large audio datasets
+dataset/

@@ -51,13 +51,13 @@ graph TD
     M --> N[Global Amplitude Summary]
 ```
 
-### High-Level Analogy
+### Conceptual Overview
 > [!TIP]
-> Think of Hello-Audio as a strict choir director holding a stopwatch and a sheet music score. 
-> 1. First, the director puts on sound-isolating headphones that only let through frequencies in the human vocal range (**Frequency Range Bounding**).
-> 2. The director ignores quick throat-clearings and breaths (**RMS Thresholding**), sliding between notes (**Pitch Slope Filter**), and accidental slips that last less than a fraction of a second (**Sustain Duration Filter**).
-> 3. If the director does not have sheet music, they assume the singer is trying to hit whatever standard note they are closest to, holding the target still even if the voice wobbles slightly (**Locked Target Rule**).
-> 4. If the director *does* have sheet music, they stretch or compress time to align the singer's syllables with the score (**Dynamic Time Warping**), and ignore octave mistakes where the singer sings the correct note but in a register that is too high or too low (**Octave Folding**).
+> Consider Hello-Audio analogous to a strict comparative evaluator:
+> 1. The system first applies a bandpass filter restricted to the physical frequency range of the designated instrument (**Frequency Range Bounding**).
+> 2. It rejects transient acoustic events, ambient noise (**RMS Thresholding**), anomalous frequency slides (**Pitch Slope Filter**), and momentary tracking artifacts (**Sustain Duration Filter**).
+> 3. In the absence of a reference score, the system assumes the performer's intended pitch is the nearest standard semitone, maintaining this target irrespective of minor performance drift (**Locked Target Rule**).
+> 4. When a reference score is provided, the system dynamically aligns the temporal execution of the performance to the score (**Dynamic Time Warping**), while mathematically resolving harmonic tracking artifacts that occur in adjacent registers (**Octave Folding**).
 
 ---
 
@@ -75,14 +75,14 @@ In `pitch_engine.py`, the limits are bound to the physical registers of string i
 * **Viola**: $f_{\min} = \text{C3} \approx 130.81\text{ Hz}$, $f_{\max} = \text{A6} \approx 1760.00\text{ Hz}$
 * **Cello**: $f_{\min} = \text{C2} \approx 65.41\text{ Hz}$, $f_{\max} = \text{E6} \approx 1318.51\text{ Hz}$
 
-### Intuitive Analogy
-Imagine searching a dictionary for a word starting with 'G'. Bounding the search means you open the dictionary directly to the 'G' section and ignore pages 'A' through 'F' and 'H' through 'Z'. Without this boundary, you might accidentally select a word in the 'S' section just because it looks slightly similar.
+### Conceptual Overview
+Limiting the search space focuses the algorithm exclusively on the physical capabilities of the instrument. Without this boundary, the probability of selecting anomalous subharmonic or high-frequency data increases significantly.
 
 ### Parameter Considerations
-* **Select Instrument**: This setting locks the frequency boundaries to the physical capabilities of the instrument. 
+* **Select Instrument**: This setting locks the frequency boundaries to the physical capabilities of the selected instrument. 
 * **Demonstration Toggle (`Enable Instrument Freq Limits`)**:
-  * **When Enabled**: High-frequency squeaks, room air conditioning rumble, and subharmonic thuds are ignored.
-  * **When Disabled (Failure Mode)**: The tracker searches the entire spectrum (from $16\text{ Hz}$ to $25,000\text{ Hz}$). Low-frequency floor rumble registers as a false $f_0$ track, and high-frequency bow-hair friction registers as whistle registers. The resulting plot will show spikes and noise in the unvoiced frames.
+  * **When Enabled**: High-frequency acoustic artifacts, ambient low-frequency noise, and subharmonic anomalies are rejected.
+  * **When Disabled (Failure Mode)**: The tracker searches the entire spectrum (from $16\text{ Hz}$ to $25,000\text{ Hz}$). Low-frequency ambient noise registers as a false $f_0$ track, and high-frequency string friction registers as anomalous pitch data. The resulting plot exhibits significant noise in the unvoiced frames.
 
 ---
 
@@ -109,8 +109,8 @@ The transition between states is governed by a transition matrix parameterized b
 $$P(S_t = \text{Voiced} \mid S_{t-1} = \text{Unvoiced}) = \beta$$
 $$P(S_t = \text{Unvoiced} \mid S_{t-1} = \text{Voiced}) = \beta$$
 
-### Intuitive Analogy
-Imagine walking on a slippery path. If you take steps without thinking about where your last step was, you might slide sideways instantly. A low switch probability acts like "inertia" or "gravity"—it expects that if you were walking forward in a straight line at the last frame, you are highly likely to keep walking forward at the next frame, rather than suddenly flying off to the side.
+### Conceptual Overview
+This probabilistic model provides algorithmic inertia. It assumes continuity in the pitch state; if the signal was evaluated as voiced in the preceding frame, a low switch probability demands significant statistical evidence to transition to an unvoiced state in the subsequent frame, thereby preventing discontinuous jumps.
 
 ### Parameter Considerations
 * **Switch Probability ($\beta$)**:
@@ -136,7 +136,7 @@ $$x_{rms} > \theta_{rms}$$
 where $\theta_{rms}$ is the user-determined RMS Amplitude Threshold.
 
 #### Failure Mode (Bypass Toggle)
-* **When Disabled**: Quiet room noise, bow scrapes on the string, and instrument resonant decay (after the note has ended) are evaluated as valid pitches. The pitch plots will show long tails of garbage pitches at the end of notes.
+* **When Disabled**: Ambient noise, string friction, and instrument resonance decay are evaluated as valid pitches. The data output will exhibit extraneous pitch data trailing the intended note terminations.
 
 ---
 
@@ -153,11 +153,11 @@ $$s[n] \le \theta_{slope} \quad \text{or} \quad \text{is\_nan}(s[n])$$
 
 where $\theta_{slope}$ is the Maximum Pitch Slope. The condition $\text{is\_nan}(s[n])$ ensures that the very first frame of a newly struck note is kept (since the transition from silence involves a NaN and would otherwise be discarded).
 
-#### Intuitive Analogy
-Imagine driving a car down a road that suddenly hits a brick wall and teleports 5 miles to the left. The derivative filter acts as a safety sensor: if the trajectory of the vehicle changes at an impossible rate, it marks that moment as an invalid transition, discarding the teleportation frames.
+#### Conceptual Overview
+This filter functions as a discontinuity sensor: if the trajectory of the frequency changes at a physically improbable rate, it marks that specific transition as invalid, discarding the anomalous frames.
 
 #### Failure Mode (Bypass Toggle)
-* **When Disabled**: The pitch track includes the violent frequency slides during note changes (transients), wide vibrato swings, and glissandos. The results will contain noisy data points at the edges of notes, raising the calculated standard deviation.
+* **When Disabled**: The pitch track retains transient frequency slides during note transitions, extreme vibrato excursions, and glissandi. The results contain anomalous data points at note boundaries, artificially elevating the calculated standard deviation.
 
 ---
 
@@ -169,11 +169,11 @@ $$L \ge \theta_{sustain}$$
 
 where $\theta_{sustain}$ is the Minimum Sustain Duration. If $L < \theta_{sustain}$, the mask for the entire range $[n_{start}, n_{end}]$ is flipped to `False`.
 
-#### Intuitive Analogy
-Think of this as a spelling checker that ignores single-letter typos. If a sound is too brief to be an intentional note (like a quick fingernail click against the wood of the cello), it is erased.
+#### Conceptual Overview
+This filter operates as a temporal smoothing mechanism. Acoustic events that are too brief to constitute intentional notes (e.g., incidental percussive impacts) are systematically discarded.
 
 #### Failure Mode (Bypass Toggle)
-* **When Disabled**: Tiny, spurious audio spikes and transient tracking artifacts appear as short notes. The results table will show a large count of short notes, skewing the overall average.
+* **When Disabled**: Brief, spurious acoustic transients and tracking artifacts are registered as independent notes. The results table will display an inflated count of short notes, skewing the overall temporal average.
 
 ---
 
@@ -188,20 +188,23 @@ The frequency deviation (in cents) for each frame in the island is calculated re
 
 $$\text{dev}[n] = (p_{midi}[n] - T) \times 100 \quad \text{cents}$$
 
-#### Intuitive Analogy
-Imagine throwing darts at a board. The **Locked Target Rule** is like drawing the target rings around the center of where your darts actually landed. Even if your hand wobbles, the center of the target stays in one place while we measure how far each dart landed from it. 
+#### Conceptual Overview
+The Locked Target Rule establishes a static center for deviation analysis over the duration of a sustained note. This isolates the performer's intonation drift relative to their initial intended target, rather than dynamically moving the target to accommodate their errors.
 
 ### Failure Mode (Bypass Toggle: `Enable Locked Target Rule`)
-* **When Enabled**: The target note $T$ is a single locked integer for the whole note island. Intonation deviation reflects how much the performer drifted from that note.
-* **When Disabled**: The target note is calculated frame-by-frame: $T[n] = \text{round}(p_{midi}[n])$. If a performer plays a note flat by more than 50 cents (e.g., drifting from C4 down towards B3), the target note shifts *mid-note*. The calculated deviation suddenly jumps from $-50$ cents to $+50$ cents, showing a discontinuous cliff in the graph. Paradoxically, the average deviation will look much lower because the target keeps moving to track the player's errors.
+* **When Enabled**: The target note $T$ is a static integer for the entire note island. Intonation deviation accurately reflects the performer's drift from that designated semitone.
+* **When Disabled**: The target note is calculated iteratively frame-by-frame: $T[n] = \text{round}(p_{midi}[n])$. If a performer plays a note significantly flat (e.g., drifting from C4 towards B3), the target note shifts mid-note. The calculated deviation exhibits a severe discontinuity in the analysis. Consequently, the average deviation calculation is artificially minimized because the target continually shifts to track the player's errors.
 
 ---
 
 ## 6. Time Alignment via Dynamic Time Warping (DTW)
 
-When a MIDI reference is uploaded, Hello-Audio swaps the legacy nearest-semitone assumption for a strict, score-bound evaluation using **Dynamic Time Warping (DTW)**.
+When a MIDI reference is uploaded, Hello-Audio swaps the legacy nearest-semitone assumption for a strict, score-bound evaluation using a **Two-Phase Architecture**:
 
-### A. Chroma CQT Feature Mapping
+### Phase 1: Temporal Alignment (Finding the Map)
+**Goal:** Align the rhythm and speed of the human performance to the MIDI score, regardless of what octave the human played in.
+
+#### A. Chroma CQT Feature Mapping
 #### Mathematical Formulation
 To align a real instrument recording with a synthesized MIDI track, the audio waveforms must be converted into a representation that is robust to differences in timbre (e.g. comparing a warm, vibrating cello to a dry, computerized sine wave). The system extracts a 12-bin **Chroma Constant-Q Transform (CQT)**. 
 
@@ -217,14 +220,32 @@ $$C[b] = \sum_{octave} X_{cqt}[b + 12 \cdot octave] \quad \text{for } b \in \{0,
 
 This yields a 12-dimensional vector at each frame representing the intensity of the 12 semitones (C, C#, D, etc.) regardless of which octave they were played in.
 
+**Figure 1**
+
+*Chroma CQT Spectral Transformation*
+
+![Chroma CQT Proof](../tests/certification_reports/04_chroma_cqt_proof_graph.png)
+
+*Note.* The transformation of a linear frequency spectrogram (left) into a 12-bin octave-agnostic Chroma CQT matrix (right), demonstrating how distinct notes C3 and C4 map to the corresponding pitch class bin.
+
 ---
 
-### B. DTW Cost Matrix & Warping Path
+#### B. DTW Cost Matrix & Warping Path
 #### Mathematical Formulation
 Let the synthesized MIDI Chroma sequence be $X = (\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_N)$ and the performed audio Chroma sequence be $Y = (\mathbf{y}_1, \mathbf{y}_2, \dots, \mathbf{y}_M)$. 
 The system computes an $N \times M$ local cost matrix using the cosine distance between the Chroma vectors:
 
 $$d(i, j) = 1 - \frac{\mathbf{x}_i \cdot \mathbf{y}_j}{\|\mathbf{x}_i\| \|\mathbf{y}_j\|}$$
+
+By using Chroma CQT instead of Absolute Frequency (STFT), the algorithm mathematically erases octave mismatches that would otherwise cause alignment failures:
+
+**Figure 2**
+
+*Cost Matrix Comparison: Absolute Frequency vs. Chroma CQT*
+
+![Chroma vs STFT Advantage Proof](../tests/certification_reports/06_chroma_dtw_advantage_proof_graph.png)
+
+*Note.* A comparison of Dynamic Time Warping (DTW) cost matrices when a human performance contains an octave error. The absolute frequency (STFT) matrix (left) produces a high-cost mismatch, whereas the Chroma CQT matrix (right) aligns the melodic sequence by omitting the register differential.
 
 The cumulative cost matrix $D(i, j)$ is computed recursively using dynamic programming:
 
@@ -236,10 +257,56 @@ D(i-1, j-1) & \text{(Match)}
 
 The optimal warping path $Wp = (w_1, w_2, \dots, w_K)$ is found by backtracking from $D(N, M)$ to $D(1, 1)$, selecting the path that minimizes the total accumulated alignment cost. This path maps each frame of the performance to the expected note index and pitch from the MIDI file.
 
-#### Intuitive Analogy
-Imagine aligning a zipper with missing or misaligned teeth. If you zip it straight up, it jams. DTW acts like a flexible zipper slider that can pause on one side or stretch the other side to ensure that every tooth on the left meshes with its correct partner on the right, even if the timing is slightly off.
+#### Conceptual Overview
+DTW functions comparably to a dynamic temporal mapping function that accommodates local deviations. It allows the algorithm to hold one timeline constant while advancing the other, ensuring corresponding acoustic events align despite rhythmic discrepancies.
+
+#### Step-by-Step Pathfinding Example
+To understand how DTW finds this path, imagine a simplified scenario where the MIDI plays a three-note melody **[C, D, E]**, but the human performer accidentally holds the first note for twice as long: **[C, C, D, E]**.
+
+The DTW algorithm constructs a grid (the **Local Cost Matrix**). At every intersection, it calculates a Cost: `0` if the notes match, and `100` if they clash.
+
+| Human Performance (Y-axis) | C (MIDI) | D (MIDI) | E (MIDI) |
+| :--- | :---: | :---: | :---: |
+| **E (Human)** | 100 | 100 | **0** (End) |
+| **D (Human)** | 100 | **0** | 100 |
+| **C (Human, Sec 2)** | **0** | 100 | 100 |
+| **C (Human, Sec 1)** | **0** (Start)| 100 | 100 |
+
+The algorithm must walk from the Bottom-Left (Start) to the Top-Right (End). It can only move **Up** (pausing the MIDI), **Right** (pausing the Human), or **Diagonal** (moving both timelines forward). It seeks the path with the lowest accumulated cost.
+
+1. It starts at (Human C vs MIDI C). Cost = 0.
+2. It looks ahead and sees moving Diagonal (Human C vs MIDI D) costs 100. Moving Right costs 100. But moving **Up** (Human C Sec 2 vs MIDI C) costs 0. It chooses to move Up, effectively "stretching" the MIDI C to match the human's held note.
+3. From there, it moves **Diagonal** to (Human D vs MIDI D) for a cost of 0.
+4. It moves **Diagonal** again to (Human E vs MIDI E) for a cost of 0, successfully reaching the end.
+
+By determining the continuous path of minimal cost, the algorithm generates the Warping Path that synchronizes the two asymmetrical timelines.
 
 ---
+
+### Phase 2: Pitch Analysis (Fixing the Intonation)
+**Goal:** Extract the raw physical frequencies, align them to the new timeline, and correct any algorithmic octave errors.
+1. The **pYIN Algorithm** runs on the raw acoustic audio to extract the exact physical frequencies (in Hz). Unlike Chroma, this data *does* contain exact octave information!
+2. The engine utilizes the "Warping Path" generated in Phase 1 to align the pYIN frequency trace to the MIDI timeline.
+
+**Figure 3**
+
+*Temporal Alignment of Raw pYIN Pitch Trace*
+
+![DTW Temporal Alignment Proof](../tests/certification_reports/05_dtw_alignment_proof_graph.png)
+
+*Note.* The application of the Chroma-derived DTW warping path to correct temporal skew. The raw human pYIN frequency trace (left, red) is temporally misaligned with the target MIDI grid (green), but is mathematically mapped into rhythmic alignment (right, blue) utilizing the optimal warping path.
+
+3. The **DTW Masking Logic** ensures that only valid, matched notes are retained, discarding silence and noise:
+
+**Figure 4**
+
+*Unvoiced Frame Masking using DTW Confidence*
+
+![DTW Masking Proof](../tests/certification_reports/03_dtw_masking_proof_graph.png)
+
+*Note.* The isolation of intentional musical notes. The raw pYIN trace (left) contains tracking noise during periods of rest. The DTW boolean masking logic (right) preserves only the frames that successfully match the MIDI score, discarding acoustic noise.
+
+4. Finally, the **Octave Folding Logic** (detailed in Section 7) corrects any harmonic tracking artifacts.
 
 ## 7. Octave Folding Logic
 
@@ -258,12 +325,20 @@ Finally, the folded pitch is converted back to Hz:
 
 $$f_{folded}[n] = 440 \cdot 2^{\frac{p_{folded}[n] - 69}{12}}$$
 
-#### Intuitive Analogy
-Imagine a clock face. If an appointment is scheduled for 2:00 PM, but you write down 2:00 AM, you are off by 12 hours (an octave error). **Octave Folding** is like looking at a 12-hour clock: it ignores the "AM/PM" offset and focuses entirely on the position of the hands, ensuring your timing accuracy is evaluated relative to 2:00, regardless of the day or night cycle.
+**Figure 5**
+
+*Octave Folding Correction of Harmonic Artifacts*
+
+![Octave Folding Proof](../tests/certification_reports/02_octave_folding_proof_graph.png)
+
+*Note.* The algorithmic correction of a pitch tracking error. A C4 note incorrectly tracked as C5 due to dominant acoustic harmonic overtones (left, red) is mathematically transposed into the correct target register (right, blue), restoring accurate intonation analysis.
+
+#### Conceptual Overview
+Octave folding operates similarly to modulo arithmetic, isolating the pitch class from its octave register. This ensures intonation is evaluated strictly on semitone accuracy irrespective of harmonic transposition errors.
 
 ### Failure Mode (Bypass Toggle: `Enable Octave Folding`)
-* **When Enabled**: Overtone tracking errors are folded back to the correct octave. The intonation deviation calculation measures the true tuning accuracy.
-* **When Disabled**: If a performer plays a note (e.g., A4 = $440\text{ Hz}$) but pYIN tracks its octave harmonic ($880\text{ Hz}$), the system calculates the deviation relative to the target. Without folding, the deviation will be calculated as $+1200$ cents. This creates massive jumps in the pitch plot and skews the average deviation.
+* **When Enabled**: Overtone tracking errors are folded back to the correct octave. The intonation deviation calculation accurately measures tuning precision.
+* **When Disabled**: If a performer plays a note (e.g., A4 = $440\text{ Hz}$) but pYIN tracks its octave harmonic ($880\text{ Hz}$), the system calculates the deviation relative to the target. Without folding, the deviation will be calculated as $+1200$ cents. This creates significant discontinuities in the pitch plot, thereby skewing the average deviation.
 
 ---
 
@@ -278,7 +353,7 @@ To analyze performance intensity, Hello-Audio measures the Root Mean Square (RMS
    $$\text{dBFS} = 20 \log_{10}(x_{rms})$$
 
 2. **dBA (A-weighted Decibels)**:
-   This applies a frequency-domain filter to mimic the human ear's sensitivity, which is less sensitive to very low and very high frequencies. 
+   This applies a frequency-domain filter to mimic the human ear's sensitivity, which is less sensitive to low and high frequency extremes. 
    
    The transfer function of the A-weighting filter in the frequency domain is defined as:
    
@@ -287,8 +362,16 @@ To analyze performance intensity, Hello-Audio measures the Root Mean Square (RMS
    
    In `amplitude_analysis.py`, the Short-Time Fourier Transform (STFT) magnitude spectrum $S(f, t)$ is multiplied by the A-weighting curve before calculating the RMS energy. This weights the frequency components according to their perceptual loudness.
 
-### Intuitive Analogy
-Imagine looking at a painting through colored glasses. The digital recording sees all colors (frequencies) with equal intensity. The A-weighting filter acts like a pair of glasses that tints the view, dimming colors at the far edges (deep infrared and high ultraviolet) so that you only see what is bright to the human eye.
+**Figure 6**
+
+*Perceptual A-Weighting of Broadband Audio*
+
+![Amplitude Proof](../tests/certification_reports/01_amplitude_proof_graph.png)
+
+*Note.* The effect of the A-weighting perceptual filter on a flat broadband noise signal. The raw signal (left) contains equal energy across all frequencies, while the filtered signal (right) attenuates low and high frequencies to mimic human hearing sensitivity.
+
+### Conceptual Overview
+The A-weighting filter functions as a frequency-dependent transformation, attenuating spectral extremes to reflect the non-linear sensitivity characteristics of the human auditory system.
 
 ---
 
@@ -302,3 +385,24 @@ Imagine looking at a painting through colored glasses. The digital recording see
 | **RMS Threshold** | $0.01 - 0.02$ | Noise Gate | Sets the minimum signal energy required to classify a frame as active. |
 | **Sustain Duration** | $10\text{ frames} \approx 116\text{ ms}$ | Note length | Discards any isolated active blocks shorter than this threshold. |
 | **Max Pitch Slope** | $0.10\text{ semitones}$ | Derivative threshold | Discards frames where the frame-to-frame pitch jump exceeds this limit. |
+
+---
+
+## 10. References & Bibliography
+
+For further reading on the mathematical principles and signal processing algorithms implemented in this engine, refer to the foundational literature below:
+
+1. **pYIN Pitch Tracking (Probabilistic YIN):**
+   * Mauch, M., & Dixon, S. (2014). *pYIN: A Fundamental Frequency Estimator Using Probabilistic Threshold Distributions*. Proceedings of the IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP).
+   * De Cheveigné, A., & Kawahara, H. (2002). *YIN, a fundamental frequency estimator for speech and music*. The Journal of the Acoustical Society of America, 111(4), 1917-1930.
+
+2. **Dynamic Time Warping (DTW) & Chroma Features:**
+   * Müller, M. (2015). *Fundamentals of Music Processing: Audio, Analysis, Algorithms, Applications*. Springer. (Specifically Chapter 3 on Music Synchronization and Chapter 4 on DTW).
+   * Ellis, D. P. W., & Poliner, G. E. (2007). *Identifying 'cover songs' with chroma features and dynamic programming beat tracking*. Proceedings of the IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP).
+
+3. **A-Weighting & Acoustic Loudness Standards:**
+   * International Electrotechnical Commission (IEC). (2003). *IEC 61672-1: Electroacoustics - Sound level meters - Part 1: Specifications*. (Defines the standard A-weighting filter curve $R_A(f)$).
+   * Fletcher, H., & Munson, W. A. (1933). *Loudness, its definition, measurement and calculation*. The Journal of the Acoustical Society of America. (Foundational research on equal-loudness contours).
+
+4. **Digital Signal Processing & Python Ecosystem:**
+   * McFee, B., Raffel, C., Liang, D., Ellis, D. P. W., McVicar, M., Battenberg, E., & Nieto, O. (2015). *librosa: Audio and Music Signal Analysis in Python*. Proceedings of the 14th Python in Science Conference.
