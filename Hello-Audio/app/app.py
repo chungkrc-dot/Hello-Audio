@@ -1,5 +1,6 @@
 """
 app.py
+# Trigger Streamlit rerun 2
 ------
 Hello-Audio: A comparative intonation and amplitude analysis application.
 This orchestrator module manages the Streamlit UI state, handles file uploads, 
@@ -33,14 +34,7 @@ def main():
     """)
     
     # ==========================================
-    # 1. Sidebar Parameters
-    # ==========================================
-    # Configures the strict filtering thresholds (Switch Probability, RMS, Sustain, Slope)
-    # used by pYIN to isolate intentional, steady-state notes from noise.
-    instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles = render_sidebar_parameters()
-    
-    # ==========================================
-    # 2. File Uploads & State Management
+    # 1. File Uploads & State Management
     # ==========================================
     # Manages the physical file inputs and resets the processing state 
     # whenever a new file is uploaded to prevent stale cache bugs.
@@ -49,9 +43,25 @@ def main():
         file_unplugged = st.file_uploader("Upload 'Unplugged' Audio (without earplugs)", type=["wav", "mp3"])
     with col_u2:
         file_plugged = st.file_uploader("Upload 'Plugged' Audio (with earplugs)", type=["wav", "mp3"])
+    target_track = None
     with col_u3:
         file_midi = st.file_uploader("Upload MIDI Reference (Optional)", type=["mid", "midi"])
-        
+        if file_midi is not None:
+            from src.midi_parser import get_midi_tracks
+            tracks = get_midi_tracks(file_midi)
+            if len(tracks) > 1:
+                track_options = list(tracks.keys())
+                track_labels = [tracks[t] for t in track_options]
+                selected_label = st.selectbox("Select Track to Analyze", track_labels)
+                target_track = track_options[track_labels.index(selected_label)]
+
+    # ==========================================
+    # 2. Sidebar Parameters
+    # ==========================================
+    # Configures the strict filtering thresholds (Switch Probability, RMS, Sustain, Slope)
+    # used by pYIN to isolate intentional, steady-state notes from noise.
+    instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles = render_sidebar_parameters(is_midi_uploaded=(file_midi is not None))
+
     # State Management
     if 'file_unplugged_name' not in st.session_state:
         st.session_state['file_unplugged_name'] = ""
@@ -92,7 +102,8 @@ def main():
         'rms_threshold': rms_threshold,
         'min_frames': min_frames,
         'max_pitch_slope': max_pitch_slope,
-        'toggles': toggles
+        'toggles': toggles,
+        'target_track': target_track
     }
     
     if 'last_params' not in st.session_state:
@@ -132,7 +143,7 @@ def main():
             status_container = st.empty()
             status_container.info("Processing... If this is the first run, pitch extraction may take a moment.")
             
-            from pitch_engine import extract_pitch_and_rms
+            from src.pitch_engine import extract_pitch_and_rms
             
             # Extract and cache
             enable_freq_limits = toggles.get('freq_limits', True)
@@ -146,8 +157,8 @@ def main():
 
             if file_midi is not None and 'analysis_results_midi' not in st.session_state:
                 with st.spinner("Parsing MIDI Reference Sequence..."):
-                    st.session_state['analysis_results_midi'] = parse_midi(file_midi)
-                    st.session_state['analysis_results_midi_timing'] = parse_midi_with_timing(file_midi)
+                    st.session_state['analysis_results_midi'] = parse_midi(file_midi, target_track=target_track)
+                    st.session_state['analysis_results_midi_timing'] = parse_midi_with_timing(file_midi, target_track=target_track)
             
             # Fast analysis logic
             if file_unplugged is not None:
@@ -187,8 +198,8 @@ def main():
                 midi_timing = st.session_state.get('analysis_results_midi_timing', [])
                 if midi_timing:
                     import librosa
-                    from midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_octave_folding
-                    from visualization import plot_alignment_diagnostics
+                    from src.midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_octave_folding
+                    from src.visualization import plot_alignment_diagnostics
                     from ui_components import render_dtw_results_table, render_dtw_summary_table
                     
                     dtw_metrics_unp = None

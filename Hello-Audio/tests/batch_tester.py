@@ -10,11 +10,10 @@ from pathlib import Path
 # Add root directory to sys path so we can import src modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import Hello-Audio modules
-from src.pitch_engine import extract_pitch_data
-from src.midi_parser import parse_midi
+from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
+from src.midi_parser import parse_midi, parse_midi_with_timing, get_midi_tempo
 from src.midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_octave_folding, get_midi_chroma, get_audio_chroma
-from src.amplitude_analysis import calculate_dBA
+
 
 def plot_dtw_cost(midi_chroma, audio_chroma, output_path):
     """Recomputes DTW and saves a plot of the Cost Matrix and Alignment Path."""
@@ -26,115 +25,179 @@ def plot_dtw_cost(midi_chroma, audio_chroma, output_path):
     plt.title('DTW Cost Matrix & Alignment Path')
     plt.plot(wp[:, 1], wp[:, 0], label='Optimal Path', color='r', linewidth=2)
     plt.xlabel('Audio Frames')
-    plt.ylabel('MIDI Frames')
-    plt.legend()
+    plt.ylabel('MIDI Frames (Synthesized)')
     plt.colorbar(label='Cosine Distance')
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
+    plt.savefig(output_path)
     plt.close()
 
 def main():
-    dataset_dir = "dataset"
-    plots_dir = "test_plots"
+    print("Starting Hello-Audio Batch Tester (Preset Sweep)...")
+    dataset_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../dataset')))
     
-    os.makedirs(plots_dir, exist_ok=True)
-    
-    # We look for all .wav files in the dataset directory recursively
-    audio_files = glob.glob(os.path.join(dataset_dir, "**", "*.wav"), recursive=True)
-    if not audio_files:
-        print(f"No .wav files found in {dataset_dir}/. Please add your files.")
-        return
-
-    results = []
-    
-    print(f"Starting batch testing on {len(audio_files)} files...")
-    
-    for audio_path in audio_files:
-        stem = Path(audio_path).stem
-        # Assume MIDI file has same stem: e.g. track1.wav -> track1.mid
-        midi_path = os.path.join(dataset_dir, f"{stem}.mid")
+    if not dataset_dir.exists():
+        print(f"Error: Dataset directory not found at {dataset_dir}")
+        sys.exit(1)
         
-        if not os.path.exists(midi_path):
-            print(f"Skipping {audio_path}: No matching .mid file found.")
+    plots_dir = dataset_dir / "test_plots"
+    plots_dir.mkdir(exist_ok=True)
+    
+    # Recursively find all audio files in the dataset
+    audio_files = list(dataset_dir.rglob("*.wav"))
+    
+    presets = {
+        "Rapid":  {"min_frames": 1, "rms": 0.01, "slope": 0.20},
+        "Medium": {"min_frames": 3, "rms": 0.01, "slope": 0.20},
+        "Legato": {"min_frames": 5, "rms": 0.01, "slope": 0.20}
+    }
+    
+    out_csv = dataset_dir / "test_results.csv"
+    # Create empty CSV with headers
+    pd.DataFrame(columns=["Filename", "BPM", "Instrument", "Piece", "Yield_Rapid", "Dev_Rapid", "Yield_Medium", "Dev_Medium", "Yield_Legato", "Dev_Legato"]).to_csv(out_csv, index=False)
+    
+    for audio_path_obj in audio_files:
+        audio_path = str(audio_path_obj)
+        stem = audio_path_obj.stem
+        
+        # Skip polyphonic mix files (we only want single isolated instrument tracks)
+        if stem.startswith('AuMix'):
+            print(f"Skipping {stem}: Polyphonic mix files are out of scope.")
+            continue
+        
+        # Look for a .mid file in the same directory
+        parent_dir = audio_path_obj.parent
+        midi_files = list(parent_dir.glob("*.mid"))
+        if not midi_files:
+            print(f"Skipping {stem}: No matching .mid file found.")
             continue
             
-        print(f"Processing: {stem}")
+        midi_path = str(midi_files[0])
         
-        # 1. Parse MIDI
-        midi_notes, _, _ = parse_midi(midi_path)
-        
-        # 2. Process Audio (using default parameters as in UI)
-        y, sr = librosa.load(audio_path, sr=44100)
-        res = extract_pitch_data(
-            audio_path, 
-            instrument="Violin", 
-            analysis_profile="Rapid", 
-            rms_threshold=0.01,
-            switch_prob=0.005,
-            sustain_duration=10,
-            max_pitch_slope=0.1
-        )
-        
-        if not res['success']:
-            print(f"  [!] Pitch extraction failed for {stem}")
-            continue
-            
-        # 3. DTW Alignment
-        time_array = librosa.times_like(res['f0'], sr=res['sr'], hop_length=512)
-        mask, expected, warped, _ = get_alignment_mask(midi_notes, time_array, res['y'], res['sr'], hop_length=512)
-        
-        # Apply octave folding (assuming True for dataset)
-        folded_f0_hz, folded_f0_midi = apply_octave_folding(res['f0'], expected)
-        
-        # Re-apply slope filter on folded pitch
-        folded_pitch_slope = np.concatenate(([0], np.abs(np.diff(folded_f0_midi))))
-        folded_slope_mask = (folded_pitch_slope <= 0.1) | np.isnan(folded_pitch_slope)
-        
-        strict_mask = mask & res['final_mask'] & folded_slope_mask
-        
-        # Calculate DTW Metrics
-        metrics = calculate_dtw_metrics(midi_notes, time_array, folded_f0_hz, res['rms'], res['final_mask'], warped)
-        
-        # 4. Generate Plot
+        # Extract track index and instrument from filename
+        parts = stem.split('_')
         try:
-            m_chroma = get_midi_chroma(midi_notes, res['sr'], 512)
-            a_chroma = get_audio_chroma(res['y'], res['sr'], 512)
-            plot_path = os.path.join(plots_dir, f"{stem}_dtw.png")
-            plot_dtw_cost(m_chroma, a_chroma, plot_path)
-            print(f"  Saved DTW plot to {plot_path}")
-        except Exception as e:
-            print(f"  [!] Failed to generate DTW plot: {e}")
+            target_track = int(parts[1])
+            inst_code = parts[2]
+        except (IndexError, ValueError):
+            target_track = None
+            inst_code = "vn"
+            
+        inst_map = {
+            "vn": "Violin", "va": "Viola", "vc": "Cello", "db": "Contrabass",
+            "fl": "Flute", "ob": "Oboe", "cl": "Clarinet", "bn": "Bassoon",
+            "sax": "Saxophone", "tpt": "Trumpet", "hn": "Horn", "tbn": "Trombone", "tba": "Tuba"
+        }
+        instrument_name = inst_map.get(inst_code, "Violin")
         
-        # 5. Evaluate Criteria
-        mean_dev_cents = metrics.get('Mean Deviation (Cents)', 9999)
-        detection_yield = float(metrics.get('Tracking Yield (%)', '0').strip('%')) if isinstance(metrics.get('Tracking Yield (%)'), str) else 0.0
-        inclusion_yield = float(metrics.get('Valid Notes for Calculation (%)', '0').strip('%')) if isinstance(metrics.get('Valid Notes for Calculation (%)'), str) else 0.0
+        # Exclude non-string instruments
+        if instrument_name not in ["Violin", "Viola", "Cello"]:
+            print(f"Skipping {stem}: Instrument '{instrument_name}' is not Violin, Viola, or Cello.")
+            continue
+            
+        print(f"\nProcessing: {stem} (Target Track: {target_track}, Instrument: {instrument_name})")
         
-        pass_yield = detection_yield >= 90.0
-        pass_valid = inclusion_yield >= 90.0
-        pass_dev = abs(mean_dev_cents) < 35.0
+        MAX_DURATION = 90.0 # Cap analysis at 1.5 minutes to prevent OOM
         
-        overall_pass = pass_yield and pass_valid and pass_dev
+        # 1. Parse MIDI and truncate to MAX_DURATION
+        with open(midi_path, 'rb') as f:
+            raw_midi_notes = parse_midi_with_timing(f, target_track=target_track)
+            
+        if not raw_midi_notes:
+            print(f"  [!] No valid notes found in Track {target_track}")
+            continue
+            
+        # Filter MIDI notes that start within the first 90 seconds
+        midi_notes = []
+        for note in raw_midi_notes:
+            start = note['Start_Time'] if isinstance(note, dict) else getattr(note, 'Start_Time', 0)
+            if start <= MAX_DURATION:
+                midi_notes.append(note)
         
-        results.append({
-            'Filename': stem,
-            'Detection Yield (%)': detection_yield,
-            'Valid Included (%)': inclusion_yield,
-            'Mean Deviation (Cents)': mean_dev_cents,
-            'Dev Std Dev (Cents)': metrics.get('Standard Deviation (Cents)', 0),
-            'Yield PASS': pass_yield,
-            'Valid PASS': pass_valid,
-            'Dev PASS': pass_dev,
-            'OVERALL PASS': overall_pass
-        })
-
-    # Output report
-    if results:
-        df = pd.DataFrame(results)
-        df.to_csv('test_results.csv', index=False)
-        print(f"\nCompleted! Report saved to test_results.csv with {len(results)} entries.")
-    else:
-        print("\nNo valid tests completed.")
+        if not midi_notes:
+            print(f"  [!] No valid notes found in the first {MAX_DURATION} seconds.")
+            continue
+            
+        bpm = get_midi_tempo(midi_path)
+        
+        # 2. Extract raw pitch once per audio file
+        with open(audio_path, 'rb') as af:
+            y, sr, f0, voiced_flag, rms = extract_pitch_and_rms(
+                af, 
+                instrument=instrument_name,
+                switch_prob=0.005,
+                enable_freq_limits=True,
+                duration=MAX_DURATION
+            )
+        
+        # Prepare row for CSV
+        row_data = {
+            "Filename": stem,
+            "BPM": round(bpm, 1),
+            "Instrument": instrument_name,
+            "Piece": parent_dir.name
+        }
+        
+        # Save a plot for DTW
+        time_array = librosa.times_like(f0, sr=sr, hop_length=512)
+        mask, expected, warped, _ = get_alignment_mask(midi_notes, time_array, y, sr, hop_length=512)
+        
+        # Memory-saver: Do NOT plot the 7750x7750 DTW Cost Matrix heatmap!
+        # Matplotlib uses >20GB of RAM to render it.
+        # try:
+        #     m_chroma = get_midi_chroma(midi_notes, sr, 512)
+        #     a_chroma = get_audio_chroma(y, sr, 512)
+        #     plot_path = os.path.join(plots_dir, f"{stem}_dtw.png")
+        #     plot_dtw_cost(m_chroma, a_chroma, plot_path)
+        # except Exception as e:
+        #     print(f"  [!] Failed to generate DTW plot: {e}")
+        
+        # 3. Iterate through all 3 presets
+        for preset_name, params in presets.items():
+            print(f"  -> Testing {preset_name} preset...")
+            
+            # Apply the filter cascade
+            pitch_track = analyze_intonation(
+                y, sr, f0, voiced_flag, rms,
+                rms_threshold=params["rms"],
+                min_frames=params["min_frames"],
+                max_pitch_slope=params["slope"],
+                toggles={'enable_pitch_slope_filter': True, 'enable_minimum_frames': True}
+            )
+            
+            final_f0 = pitch_track['f0']
+            final_mask = ~np.isnan(final_f0)
+            
+            folded_f0_hz, folded_f0_midi = apply_octave_folding(final_f0, expected)
+            
+            folded_pitch_slope = np.concatenate(([0], np.abs(np.diff(folded_f0_midi))))
+            folded_slope_mask = (folded_pitch_slope <= params["slope"]) | np.isnan(folded_pitch_slope)
+            
+            strict_mask = mask & final_mask & folded_slope_mask
+            # Calculate metrics
+            metrics_list = calculate_dtw_metrics(midi_notes, time_array, folded_f0_hz, rms, strict_mask, warped)
+            
+            valid_notes = [n for n in metrics_list if not np.isnan(n['Deviation_Cents'])]
+            yield_pct = len(valid_notes) / len(metrics_list) if metrics_list else 0
+            mean_dev = np.mean([abs(n['Deviation_Cents']) for n in valid_notes]) if valid_notes else 0
+            
+            row_data[f"Yield_{preset_name}"] = round(yield_pct * 100, 2)
+            row_data[f"Dev_{preset_name}"] = round(mean_dev, 2)
+            
+            # Delete inner loop vars immediately
+            del pitch_track, final_f0, final_mask, folded_f0_hz, folded_f0_midi, folded_pitch_slope, folded_slope_mask, strict_mask, metrics_list, valid_notes
+            
+        # Append row immediately to CSV so it's safely written before the next file
+        pd.DataFrame([row_data]).to_csv(out_csv, mode='a', header=False, index=False)
+        print(f"  [+] Data saved for {stem}")
+        
+        # Aggressive memory management to prevent macOS out-of-memory warnings
+        import gc
+        del y, sr, f0, voiced_flag, rms, time_array, mask, expected, warped, midi_notes, raw_midi_notes, row_data
+        plt.close('all') # Force close all matplotlib backends
+        gc.collect() # Force Python to dump the massive arrays from RAM immediately
+        
+    print(f"\nMicro-Batch testing complete! Results saved to {out_csv}")
 
 if __name__ == "__main__":
     main()

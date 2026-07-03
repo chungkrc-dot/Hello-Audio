@@ -185,8 +185,8 @@ def plot_alignment_diagnostics(time_array, f0_midi, expected_audio_pitch, valid_
         xaxis_title="Time (s)",
         yaxis_title="Pitch (MIDI)",
         yaxis=dict(range=y_range) if y_range else dict(),
-        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
-        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+        margin=dict(l=20, r=20, t=40, b=80),
         hovermode="closest"
     )
     

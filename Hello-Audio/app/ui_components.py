@@ -11,27 +11,34 @@ import numpy as np
 import pandas as pd
 from itertools import zip_longest
 
-def render_sidebar_parameters():
+def render_sidebar_parameters(is_midi_uploaded=False):
     """
     Renders the sidebar UI elements and returns the selected parameters.
     """
     st.sidebar.header("Pitch Analyser Parameters")
     
     preset = st.sidebar.selectbox(
-        "Analysis Profile",
-        ["Custom (Manual Tuning)", "Rapid / Virtuosic", "Slow / Legato"],
-        help="Select a standardized preset to lock parameters across participants, ensuring experimental consistency."
+        "Analysis Profile (Legacy Mode)",
+        ["Custom (Manual Tuning)", "Rapid / Virtuosic", "Medium / Andante", "Slow / Legato"],
+        help="Select a standardized preset. Note: These presets primarily govern the Legacy Island Intonation logic. The DTW engine is robust enough to ignore tempo.",
+        disabled=is_midi_uploaded
     )
     
     if preset == "Rapid / Virtuosic":
         def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 1, 0.20
         disabled = True
+    elif preset == "Medium / Andante":
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 3, 0.20
+        disabled = True
     elif preset == "Slow / Legato":
-        def_switch, def_rms, def_frames, def_slope = 0.005, 0.02, 10, 0.10
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 5, 0.20
         disabled = True
     else:
         def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 10, 0.10
         disabled = False
+
+    if is_midi_uploaded:
+        disabled = True
 
     instrument = st.sidebar.selectbox(
         "Select Instrument",

@@ -18,7 +18,9 @@ def get_midi_chroma(midi_notes, sr, hop_length):
     if not midi_notes:
         return np.array([])
         
-    first_start = midi_notes[0]['Start_Time'] if isinstance(midi_notes[0], dict) else getattr(midi_notes[0], 'Start_Time', 0)
+    # We force first_start to 0 so that the synthesized MIDI track preserves leading rests/silence.
+    # Otherwise, DTW maps the audio's leading silence to the first MIDI note!
+    first_start = 0
     last_end = midi_notes[-1]['End_Time'] if isinstance(midi_notes[-1], dict) else getattr(midi_notes[-1], 'End_Time', 0)
     
     duration = last_end - first_start
@@ -51,15 +53,19 @@ def get_midi_chroma(midi_notes, sr, hop_length):
             wave = np.sin(2 * np.pi * freq * note_t)
             y_midi[start_sample:end_sample] += wave
             
-    chroma = librosa.feature.chroma_cqt(y=y_midi, sr=sr, hop_length=hop_length)
-    return chroma
+    chroma = librosa.feature.chroma_cqt(y=y_midi, sr=sr, hop_length=hop_length, fmin=65.4)
+    chroma = np.nan_to_num(chroma, nan=0.0)
+    return chroma + 1e-6
 
 def get_audio_chroma(audio_y, sr, hop_length):
     """
     Extracts the 12-bin Chroma CQT from the raw audio waveform.
     """
+    import numpy as np
     import librosa
-    return librosa.feature.chroma_cqt(y=audio_y, sr=sr, hop_length=hop_length)
+    chroma = librosa.feature.chroma_cqt(y=audio_y, sr=sr, hop_length=hop_length, fmin=65.4)
+    chroma = np.nan_to_num(chroma, nan=0.0)
+    return chroma + 1e-6
 
 def compute_dtw_path(midi_chroma, audio_chroma):
     """
@@ -107,7 +113,8 @@ def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
     wp = compute_dtw_path(midi_chroma, audio_chroma)
     
     # 3. Convert DTW path to absolute time mapping
-    first_start = midi_notes[0]['Start_Time'] if isinstance(midi_notes[0], dict) else getattr(midi_notes[0], 'Start_Time', 0)
+    # Since we set first_start to 0 in get_midi_chroma, the MIDI times are already absolute!
+    first_start = 0
     audio_times = librosa.frames_to_time(wp[:, 0], sr=sr, hop_length=hop_length)
     midi_times = librosa.frames_to_time(wp[:, 1], sr=sr, hop_length=hop_length) + first_start
     

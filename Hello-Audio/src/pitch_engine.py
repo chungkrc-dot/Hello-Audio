@@ -18,13 +18,13 @@ def get_instrument_fmin_fmax(instrument: str):
         # Default fallback covering most orchestral strings
         return librosa.note_to_hz('C2'), librosa.note_to_hz('C7')
 
-def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limits=True):
+def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limits=True, duration=None):
     """
     Loads audio, extracts pitch using pYIN, and calculates RMS energy.
     Ensures all arrays are exactly the same length.
     """
     audio_file.seek(0)
-    y, sr = librosa.load(audio_file, sr=None)
+    y, sr = librosa.load(audio_file, sr=None, duration=duration)
     
     if enable_freq_limits:
         fmin_hz, fmax_hz = get_instrument_fmin_fmax(instrument)
