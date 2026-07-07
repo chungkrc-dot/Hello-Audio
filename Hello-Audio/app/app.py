@@ -20,6 +20,15 @@ from src.midi_parser import parse_midi, parse_midi_with_timing
 from ui_components import render_sidebar_parameters, render_results_table, render_sequence_comparison, render_dtw_results_table, render_dtw_summary_table
 from src.visualization import render_pitch_track_visualizations
 
+def _check_and_invalidate_cache(uploaded_file, name_key, keys_to_delete):
+    if uploaded_file is not None and uploaded_file.name != st.session_state.get(name_key, ""):
+        st.session_state['analyze_clicked'] = False
+        st.session_state[name_key] = uploaded_file.name
+        for key in keys_to_delete:
+            if key in st.session_state:
+                del st.session_state[key]
+
+
 def main():
     st.set_page_config(page_title="Hello-Audio", layout="wide")
     
@@ -73,27 +82,9 @@ def main():
         st.session_state['analyze_clicked'] = False
 
     # Invalidate cache if files change
-    if file_unplugged is not None and file_unplugged.name != st.session_state['file_unplugged_name']:
-        st.session_state['analyze_clicked'] = False
-        st.session_state['file_unplugged_name'] = file_unplugged.name
-        if 'analysis_results_unplugged' in st.session_state:
-            del st.session_state['analysis_results_unplugged']
-        if 'extracted_unp' in st.session_state:
-            del st.session_state['extracted_unp']
-
-    if file_plugged is not None and file_plugged.name != st.session_state['file_plugged_name']:
-        st.session_state['analyze_clicked'] = False
-        st.session_state['file_plugged_name'] = file_plugged.name
-        if 'analysis_results_plugged' in st.session_state:
-            del st.session_state['analysis_results_plugged']
-        if 'extracted_plg' in st.session_state:
-            del st.session_state['extracted_plg']
-
-    if file_midi is not None and file_midi.name != st.session_state['file_midi_name']:
-        st.session_state['analyze_clicked'] = False
-        st.session_state['file_midi_name'] = file_midi.name
-        if 'analysis_results_midi' in st.session_state:
-            del st.session_state['analysis_results_midi']
+    _check_and_invalidate_cache(file_unplugged, 'file_unplugged_name', ['analysis_results_unplugged', 'extracted_unp'])
+    _check_and_invalidate_cache(file_plugged, 'file_plugged_name', ['analysis_results_plugged', 'extracted_plg'])
+    _check_and_invalidate_cache(file_midi, 'file_midi_name', ['analysis_results_midi', 'analysis_results_midi_timing'])
 
     # Detect Parameter Changes to Invalidate Cache
     current_params = {
@@ -113,16 +104,14 @@ def main():
         st.session_state['analyze_clicked'] = False
         st.session_state['last_params'] = current_params
         # Clear all cached extractions and results so the analysis reruns with new settings
-        if 'analysis_results_unplugged' in st.session_state:
-            del st.session_state['analysis_results_unplugged']
-        if 'extracted_unp' in st.session_state:
-            del st.session_state['extracted_unp']
-        if 'analysis_results_plugged' in st.session_state:
-            del st.session_state['analysis_results_plugged']
-        if 'extracted_plg' in st.session_state:
-            del st.session_state['extracted_plg']
-        if 'analysis_results_midi' in st.session_state:
-            del st.session_state['analysis_results_midi']
+        keys_to_clear = [
+            'analysis_results_unplugged', 'extracted_unp', 
+            'analysis_results_plugged', 'extracted_plg', 
+            'analysis_results_midi', 'analysis_results_midi_timing'
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
             
     # ==========================================
     # 3. Execution Engine
@@ -198,7 +187,7 @@ def main():
                 midi_timing = st.session_state.get('analysis_results_midi_timing', [])
                 if midi_timing:
                     import librosa
-                    from src.midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_harmonic_folding
+                    from src.midi_alignment import process_dtw_alignment, calculate_dtw_metrics
                     from src.visualization import plot_alignment_diagnostics
                     from ui_components import render_dtw_results_table, render_dtw_summary_table
                     
@@ -217,25 +206,10 @@ def main():
                     
                     if unp_ok:
                         st.write("**Unplugged Alignment:**")
-                        time_array_unp = librosa.times_like(res_unp['f0'], sr=res_unp['sr'], hop_length=512)
-                        mask_unp, expected_unp, warped_unp, expected_note_index_unp = get_alignment_mask(midi_timing, time_array_unp, res_unp['y'], res_unp['sr'], hop_length=512, force_global=toggles.get('force_global', True))
+                        time_array_unp, expected_unp, warped_unp, expected_note_index_unp, folded_f0_hz_unp, folded_f0_midi_unp, strict_mask_unp = process_dtw_alignment(
+                            midi_timing, res_unp['f0'], res_unp['y'], res_unp['sr'], res_unp['final_mask'], toggles, max_pitch_slope
+                        )
                         
-                        # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting if enabled
-                        if toggles.get('harmonic_folding', True):
-                            folded_f0_hz_unp, folded_f0_midi_unp = apply_harmonic_folding(res_unp['f0'], expected_unp)
-                        else:
-                            folded_f0_hz_unp = res_unp['f0']
-                            folded_f0_midi_unp = librosa.hz_to_midi(folded_f0_hz_unp)
-                        
-                        # Re-calculate the slope filter on the mathematically folded pitch path to remove any artificial vertical cliffs
-                        import numpy as np
-                        folded_pitch_slope_unp = np.concatenate(([0], np.abs(np.diff(folded_f0_midi_unp))))
-                        if toggles.get('slope_filter', True):
-                            folded_slope_mask_unp = (folded_pitch_slope_unp <= max_pitch_slope) | np.isnan(folded_pitch_slope_unp)
-                        else:
-                            folded_slope_mask_unp = np.ones_like(folded_pitch_slope_unp, dtype=bool)
-                        
-                        strict_mask_unp = mask_unp & res_unp['final_mask'] & folded_slope_mask_unp
                         fig_unp_dtw = plot_alignment_diagnostics(
                             time_array_unp, folded_f0_midi_unp, expected_unp, strict_mask_unp, 
                             expected_note_index_unp, show_target, show_extraneous, show_matched
@@ -246,25 +220,10 @@ def main():
                     
                     if plg_ok:
                         st.write("**Plugged Alignment:**")
-                        time_array_plg = librosa.times_like(res_plg['f0'], sr=res_plg['sr'], hop_length=512)
-                        mask_plg, expected_plg, warped_plg, expected_note_index_plg = get_alignment_mask(midi_timing, time_array_plg, res_plg['y'], res_plg['sr'], hop_length=512, force_global=toggles.get('force_global', True))
+                        time_array_plg, expected_plg, warped_plg, expected_note_index_plg, folded_f0_hz_plg, folded_f0_midi_plg, strict_mask_plg = process_dtw_alignment(
+                            midi_timing, res_plg['f0'], res_plg['y'], res_plg['sr'], res_plg['final_mask'], toggles, max_pitch_slope
+                        )
                         
-                        # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting if enabled
-                        if toggles.get('harmonic_folding', True):
-                            folded_f0_hz_plg, folded_f0_midi_plg = apply_harmonic_folding(res_plg['f0'], expected_plg)
-                        else:
-                            folded_f0_hz_plg = res_plg['f0']
-                            folded_f0_midi_plg = librosa.hz_to_midi(folded_f0_hz_plg)
-                        
-                        # Re-calculate the slope filter on the mathematically folded pitch path to remove any artificial vertical cliffs
-                        import numpy as np
-                        folded_pitch_slope_plg = np.concatenate(([0], np.abs(np.diff(folded_f0_midi_plg))))
-                        if toggles.get('slope_filter', True):
-                            folded_slope_mask_plg = (folded_pitch_slope_plg <= max_pitch_slope) | np.isnan(folded_pitch_slope_plg)
-                        else:
-                            folded_slope_mask_plg = np.ones_like(folded_pitch_slope_plg, dtype=bool)
-                        
-                        strict_mask_plg = mask_plg & res_plg['final_mask'] & folded_slope_mask_plg
                         fig_plg_dtw = plot_alignment_diagnostics(
                             time_array_plg, folded_f0_midi_plg, expected_plg, strict_mask_plg, 
                             expected_note_index_plg, show_target, show_extraneous, show_matched

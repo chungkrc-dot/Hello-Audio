@@ -275,3 +275,38 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
             
     return dtw_results
 
+def process_dtw_alignment(midi_timing, f0_hz, audio_y, sr, final_mask, toggles, max_pitch_slope, hop_length=512):
+    """
+    Encapsulates the full DTW alignment, harmonic folding, and mask recalculation logic.
+    Returns all variables required by the visualizer and metric calculator.
+    """
+    import librosa
+    import numpy as np
+    
+    time_array = librosa.times_like(f0_hz, sr=sr, hop_length=hop_length)
+    
+    # 1. Alignment Mask
+    force_global = toggles.get('force_global', True)
+    mask, expected_pitch, warped_timeline, expected_note_index = get_alignment_mask(
+        midi_timing, time_array, audio_y, sr, hop_length=hop_length, force_global=force_global
+    )
+    
+    # 2. Harmonic Folding
+    if toggles.get('harmonic_folding', True):
+        folded_f0_hz, folded_f0_midi = apply_harmonic_folding(f0_hz, expected_pitch)
+    else:
+        folded_f0_hz = f0_hz
+        folded_f0_midi = librosa.hz_to_midi(folded_f0_hz)
+        
+    # 3. Slope Mask Recalculation
+    folded_pitch_slope = np.concatenate(([0], np.abs(np.diff(folded_f0_midi))))
+    if toggles.get('slope_filter', True):
+        folded_slope_mask = (folded_pitch_slope <= max_pitch_slope) | np.isnan(folded_pitch_slope)
+    else:
+        folded_slope_mask = np.ones_like(folded_pitch_slope, dtype=bool)
+        
+    # 4. Strict Mask for visualization
+    strict_mask = mask & final_mask & folded_slope_mask
+    
+    return time_array, expected_pitch, warped_timeline, expected_note_index, folded_f0_hz, folded_f0_midi, strict_mask
+
