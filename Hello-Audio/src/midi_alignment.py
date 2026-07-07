@@ -67,33 +67,58 @@ def get_audio_chroma(audio_y, sr, hop_length):
     chroma = np.nan_to_num(chroma, nan=0.0)
     return chroma + 1e-6
 
-def compute_dtw_path(midi_chroma, audio_chroma):
+def compute_dtw_path(midi_chroma, audio_chroma, force_global=False):
     """
-    Computes the Dynamic Time Warping (DTW) path using multi-dimensional Chroma features.
+    Computes the Dynamic Time Warping (DTW) path between MIDI and Audio Chroma.
+    Automatically handles sequence length swapping to satisfy librosa's subseq requirements,
+    unless force_global=True which forces a global alignment.
     """
     import numpy as np
     import librosa
     
     # Subsequence DTW requires the shorter query sequence to be the first argument (X) 
     # and the longer reference sequence to be the second argument (Y).
-    D, wp = librosa.sequence.dtw(
-        midi_chroma, 
-        audio_chroma, 
-        metric='cosine', 
-        subseq=True
-    )
+    # We dynamically swap them so the algorithm is mathematically robust to any tempo.
     
-    # Crucial Matrix formatting: Because we swapped the inputs to (midi, audio), 
-    # librosa returns a warping_path where column 0 = MIDI indices and column 1 = Audio indices.
-    # We must swap the columns using np.fliplr so that the returned format remains 
-    # (audio_index, expected_midi_index). This ensures the downstream 
-    # generate_valid_mask and diagnostic plotting functions do not break.
-    wp = np.fliplr(wp)
+    len_midi = midi_chroma.shape[1]
+    len_audio = audio_chroma.shape[1]
+    
+    if force_global:
+        # Force global alignment, anchoring the start and end of both sequences.
+        D, wp = librosa.sequence.dtw(
+            midi_chroma, 
+            audio_chroma, 
+            metric='cosine', 
+            subseq=False
+        )
+        wp = np.fliplr(wp)
+    elif len_midi <= len_audio:
+        # MIDI is shorter (student played slow). Normal configuration.
+        D, wp = librosa.sequence.dtw(
+            midi_chroma, 
+            audio_chroma, 
+            metric='cosine', 
+            subseq=True
+        )
+        # wp has shape (N, 2), where column 0 = MIDI, column 1 = Audio.
+        # Downstream expects (Audio, MIDI), so we flip it.
+        wp = np.fliplr(wp)
+    else:
+        # Audio is shorter (student played fast). Swapped configuration.
+        D, wp = librosa.sequence.dtw(
+            audio_chroma, 
+            midi_chroma, 
+            metric='cosine', 
+            subseq=True
+        )
+        # wp has shape (N, 2), where column 0 = Audio, column 1 = MIDI.
+        # This is already the downstream expected format (Audio, MIDI), so no flip is needed!
+        pass
     
     return wp
 
 
-def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
+def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512, force_global=False):
     """
     Main orchestration function for DTW alignment. 
     1. Synthesizes a reference audio track from the MIDI sequence.
@@ -110,7 +135,7 @@ def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
     
     # 2. Compute DTW on Chroma
     # wp is formatted as [audio_frame, midi_frame]
-    wp = compute_dtw_path(midi_chroma, audio_chroma)
+    wp = compute_dtw_path(midi_chroma, audio_chroma, force_global=force_global)
     
     # 3. Convert DTW path to absolute time mapping
     # Since we set first_start to 0 in get_midi_chroma, the MIDI times are already absolute!
@@ -144,11 +169,11 @@ def get_alignment_mask(midi_notes, time_array, audio_y, sr, hop_length=512):
         
     return valid_dtw_mask, expected_audio_pitch, warped_midi_timeline, expected_note_index
 
-def apply_octave_folding(f0_hz, expected_midi_pitch):
+def apply_harmonic_folding(f0_hz, expected_midi_pitch):
     """
-    Algorithm to mathematically fold the raw extracted pitch (f0) into the expected octave of the MIDI note.
-    This corrects algorithmic "octave errors" inherent in pYIN when tracking rich acoustic instruments, 
-    ensuring that a perfectly in-tune harmonic overtone is evaluated as the correct pitch.
+    Algorithm to mathematically fold the raw extracted pitch (f0) into the target pitch.
+    This corrects algorithmic "octave errors" and harmonic confusion (e.g. tracking a Perfect 5th 
+    instead of the fundamental) inherent in pYIN when tracking rich acoustic instruments.
     """
     import numpy as np
     import librosa
@@ -156,13 +181,27 @@ def apply_octave_folding(f0_hz, expected_midi_pitch):
     f0_midi = librosa.hz_to_midi(f0_hz)
     valid_mask = ~np.isnan(f0_midi) & ~np.isnan(expected_midi_pitch)
     
+    # 1. Octave Folding
     octave_offsets = np.zeros_like(f0_midi)
     octave_offsets[valid_mask] = np.round((f0_midi[valid_mask] - expected_midi_pitch[valid_mask]) / 12.0)
     
-    folded_f0_midi = f0_midi - (octave_offsets * 12.0)
-    folded_f0_hz = librosa.midi_to_hz(folded_f0_midi)
+    f0_midi_oct = f0_midi - (octave_offsets * 12.0)
     
-    return folded_f0_hz, folded_f0_midi
+    # 2. Harmonic Folding
+    dev = np.zeros_like(f0_midi)
+    dev[valid_mask] = f0_midi_oct[valid_mask] - expected_midi_pitch[valid_mask]
+    
+    # Perfect 5th confusion (e.g. 3rd, 6th harmonics) mathematically folds to around -5.0
+    is_fifth_harmonic = valid_mask & (dev >= -5.5) & (dev <= -4.5)
+    f0_midi_oct[is_fifth_harmonic] += 5.0
+    
+    # Major 3rd confusion (e.g. 5th harmonic) mathematically folds to around +4.0
+    is_third_harmonic = valid_mask & (dev >= 3.5) & (dev <= 4.5)
+    f0_midi_oct[is_third_harmonic] -= 4.0
+    
+    folded_f0_hz = librosa.midi_to_hz(f0_midi_oct)
+    
+    return folded_f0_hz, f0_midi_oct
 
 def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline):
     """

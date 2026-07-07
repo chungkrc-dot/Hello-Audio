@@ -34,11 +34,10 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 5, 0.20
         disabled = True
     else:
-        def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 10, 0.10
+        def_switch, def_rms, def_frames, def_slope = 0.005, 0.005, 2, 0.5
         disabled = False
 
-    if is_midi_uploaded:
-        disabled = True
+    disabled = False
 
     instrument = st.sidebar.selectbox(
         "Select Instrument",
@@ -62,7 +61,8 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         min_value=0.0, 
         max_value=1.0, 
         value=def_rms, 
-        step=0.005,
+        step=0.001,
+        format="%.3f",
         disabled=disabled,
         help="Minimum RMS energy required for a frame to be considered active. Filters out background noise and quiet transients."
     )
@@ -97,14 +97,16 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     enable_slope_filter = st.sidebar.checkbox("Enable Pitch Slope Filter", value=True, help="Discard frames where pitch changes too rapidly.")
     enable_duration_filter = st.sidebar.checkbox("Enable Sustain Duration Filter", value=True, help="Discard pitch islands that are too short.")
     enable_locked_target = st.sidebar.checkbox("Enable Locked Target Rule", value=True, help="Lock legacy notes to their median semitone.")
-    enable_octave_folding = st.sidebar.checkbox("Enable Octave Folding", value=True, help="Fold tracking errors to target octave in DTW.")
+    enable_harmonic_folding = st.sidebar.checkbox("Enable Octave & Harmonic Folding", value=True, help="Fold octave and harmonic (e.g. perfect 5th) tracking errors to target note in DTW.")
+    enable_force_global = st.sidebar.checkbox("Force Global DTW Alignment", value=True, help="Forces a strict 1:1 global DTW alignment, preventing path degeneracy on fast repetitive full performances.")
     
     toggles = {
         "freq_limits": enable_freq_limits,
         "slope_filter": enable_slope_filter,
         "duration_filter": enable_duration_filter,
         "locked_target": enable_locked_target,
-        "octave_folding": enable_octave_folding
+        "harmonic_folding": enable_harmonic_folding,
+        "force_global": enable_force_global
     }
     
     return instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles

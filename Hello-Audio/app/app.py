@@ -198,7 +198,7 @@ def main():
                 midi_timing = st.session_state.get('analysis_results_midi_timing', [])
                 if midi_timing:
                     import librosa
-                    from src.midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_octave_folding
+                    from src.midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_harmonic_folding
                     from src.visualization import plot_alignment_diagnostics
                     from ui_components import render_dtw_results_table, render_dtw_summary_table
                     
@@ -218,11 +218,11 @@ def main():
                     if unp_ok:
                         st.write("**Unplugged Alignment:**")
                         time_array_unp = librosa.times_like(res_unp['f0'], sr=res_unp['sr'], hop_length=512)
-                        mask_unp, expected_unp, warped_unp, expected_note_index_unp = get_alignment_mask(midi_timing, time_array_unp, res_unp['y'], res_unp['sr'], hop_length=512)
+                        mask_unp, expected_unp, warped_unp, expected_note_index_unp = get_alignment_mask(midi_timing, time_array_unp, res_unp['y'], res_unp['sr'], hop_length=512, force_global=toggles.get('force_global', True))
                         
                         # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting if enabled
-                        if toggles.get('octave_folding', True):
-                            folded_f0_hz_unp, folded_f0_midi_unp = apply_octave_folding(res_unp['f0'], expected_unp)
+                        if toggles.get('harmonic_folding', True):
+                            folded_f0_hz_unp, folded_f0_midi_unp = apply_harmonic_folding(res_unp['f0'], expected_unp)
                         else:
                             folded_f0_hz_unp = res_unp['f0']
                             folded_f0_midi_unp = librosa.hz_to_midi(folded_f0_hz_unp)
@@ -247,11 +247,11 @@ def main():
                     if plg_ok:
                         st.write("**Plugged Alignment:**")
                         time_array_plg = librosa.times_like(res_plg['f0'], sr=res_plg['sr'], hop_length=512)
-                        mask_plg, expected_plg, warped_plg, expected_note_index_plg = get_alignment_mask(midi_timing, time_array_plg, res_plg['y'], res_plg['sr'], hop_length=512)
+                        mask_plg, expected_plg, warped_plg, expected_note_index_plg = get_alignment_mask(midi_timing, time_array_plg, res_plg['y'], res_plg['sr'], hop_length=512, force_global=toggles.get('force_global', True))
                         
                         # Globally fold the extracted pitch to correct tracking harmonics BEFORE plotting if enabled
-                        if toggles.get('octave_folding', True):
-                            folded_f0_hz_plg, folded_f0_midi_plg = apply_octave_folding(res_plg['f0'], expected_plg)
+                        if toggles.get('harmonic_folding', True):
+                            folded_f0_hz_plg, folded_f0_midi_plg = apply_harmonic_folding(res_plg['f0'], expected_plg)
                         else:
                             folded_f0_hz_plg = res_plg['f0']
                             folded_f0_midi_plg = librosa.hz_to_midi(folded_f0_hz_plg)
