@@ -18,37 +18,72 @@ def get_instrument_fmin_fmax(instrument: str):
         # Default fallback covering most orchestral strings
         return librosa.note_to_hz('C2'), librosa.note_to_hz('C7')
 
-def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limits=True, duration=None):
+def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limits=True, duration=None, pitch_engine="pYIN"):
     """
-    Loads audio, extracts pitch using pYIN, and calculates RMS energy.
+    Loads audio, extracts pitch using the selected engine (pYIN or REAPER), and calculates RMS energy.
     Ensures all arrays are exactly the same length.
     """
     audio_file.seek(0)
-    y, sr = librosa.load(audio_file, sr=None, duration=duration)
     
     if enable_freq_limits:
         fmin_hz, fmax_hz = get_instrument_fmin_fmax(instrument)
     else:
         # A broad fallback covering the audible spectrum to simulate no limits
         fmin_hz, fmax_hz = librosa.note_to_hz('C0'), librosa.note_to_hz('G9')
+    
+    if pitch_engine == "REAPER":
+        import pyreaper
+        # REAPER strongly prefers 16kHz audio for optimal performance
+        y, sr = librosa.load(audio_file, sr=16000, duration=duration)
+        y_int16 = (y * 32767).astype(np.int16)
         
-    f0, voiced_flag, _ = librosa.pyin(
-        y, 
-        fmin=fmin_hz, 
-        fmax=fmax_hz, 
-        sr=sr,
-        switch_prob=switch_prob
-    )
-    
-    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
-    
+        # hop_length equivalent for 44.1kHz is 512, which is ~11.6ms. 
+        # For 16kHz, we use frame_period of 11.6ms
+        frame_period = 512.0 / 44100.0
+        
+        # Extend the range slightly for REAPER to avoid edge clipping
+        pm_times, pm, f0_times, f0, corr = pyreaper.reaper(y_int16, sr, minf0=max(40.0, fmin_hz), maxf0=min(2000.0, fmax_hz), frame_period=frame_period)
+        
+        f0[f0 == -1.0] = np.nan
+        
+        # Restore to full 44.1kHz equivalent timeline for identical masking mathematically
+        target_sr = 44100
+        hop_length = 512
+        audio_file.seek(0)
+        y_orig, _ = librosa.load(audio_file, sr=target_sr, duration=duration)
+        
+        expected_frames = int(np.ceil(len(y_orig) / hop_length))
+        time_standard = librosa.times_like(np.zeros(expected_frames), sr=target_sr, hop_length=hop_length)
+        
+        f0_standard = np.interp(time_standard, f0_times, f0, left=np.nan, right=np.nan)
+        voiced_flag = ~np.isnan(f0_standard)
+        
+        # Use the original high-res audio for RMS
+        rms = librosa.feature.rms(y=y_orig, frame_length=2048, hop_length=512)[0]
+        y_return = y_orig
+        sr_return = target_sr
+        f0_return = f0_standard
+    else:
+        # pYIN Path
+        y, sr = librosa.load(audio_file, sr=None, duration=duration)
+        f0_return, voiced_flag, _ = librosa.pyin(
+            y, 
+            fmin=fmin_hz, 
+            fmax=fmax_hz, 
+            sr=sr,
+            switch_prob=switch_prob
+        )
+        rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
+        y_return = y
+        sr_return = sr
+        
     # Ensure all arrays are exactly the same length before logical operations
     min_len = min(len(voiced_flag), len(rms))
-    f0 = f0[:min_len]
+    f0_return = f0_return[:min_len]
     voiced_flag = voiced_flag[:min_len]
     rms = rms[:min_len]
     
-    return y, sr, f0, voiced_flag, rms
+    return y_return, sr_return, f0_return, voiced_flag, rms
 
 def generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope, enable_slope_filter=True):
     """

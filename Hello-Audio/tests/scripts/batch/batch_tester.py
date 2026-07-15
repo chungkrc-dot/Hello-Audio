@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Add root directory to sys path so we can import src modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
 from src.midi_parser import parse_midi, parse_midi_with_timing, get_midi_tempo
@@ -40,7 +41,10 @@ def main():
         print(f"Error: Dataset directory not found at {dataset_dir}")
         sys.exit(1)
         
-    plots_dir = dataset_dir / "test_plots"
+    tests_dir = Path(os.path.abspath(os.path.dirname(__file__)))
+    output_dir = tests_dir / "batch_results"
+    output_dir.mkdir(exist_ok=True)
+    plots_dir = output_dir / "test_plots"
     plots_dir.mkdir(exist_ok=True)
     
     # Recursively find all audio files in the dataset
@@ -52,7 +56,7 @@ def main():
         "Legato": {"min_frames": 5, "rms": 0.01, "slope": 0.20}
     }
     
-    out_csv = dataset_dir / "test_results.csv"
+    out_csv = output_dir / "test_results.csv"
     # Create empty CSV with headers
     pd.DataFrame(columns=["Filename", "BPM", "Instrument", "Piece", "Yield_Rapid", "Dev_Rapid", "Yield_Medium", "Dev_Medium", "Yield_Legato", "Dev_Legato"]).to_csv(out_csv, index=False)
     

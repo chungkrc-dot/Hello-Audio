@@ -28,6 +28,23 @@ def _check_and_invalidate_cache(uploaded_file, name_key, keys_to_delete):
             if key in st.session_state:
                 del st.session_state[key]
 
+def _check_and_invalidate_engine_cache(pitch_engine, instrument, switch_prob, freq_limits):
+    if ('pitch_engine' not in st.session_state or
+        'engine_instrument' not in st.session_state or 
+        'engine_switch_prob' not in st.session_state or
+        'engine_freq_limits' not in st.session_state or
+        st.session_state['pitch_engine'] != pitch_engine or
+        st.session_state['engine_instrument'] != instrument or
+        st.session_state['engine_switch_prob'] != switch_prob or
+        st.session_state['engine_freq_limits'] != freq_limits):
+        
+        st.session_state['pitch_engine'] = pitch_engine
+        st.session_state['engine_instrument'] = instrument
+        st.session_state['engine_switch_prob'] = switch_prob
+        st.session_state['engine_freq_limits'] = freq_limits
+        return True
+    return False
+
 
 def main():
     st.set_page_config(page_title="Hello-Audio", layout="wide")
@@ -67,9 +84,16 @@ def main():
     # ==========================================
     # 2. Sidebar Parameters
     # ==========================================
-    # Configures the strict filtering thresholds (Switch Probability, RMS, Sustain, Slope)
-    # used by pYIN to isolate intentional, steady-state notes from noise.
-    instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles = render_sidebar_parameters(is_midi_uploaded=(file_midi is not None))
+    # 1. SIDEBAR PARAMETERS
+    pitch_engine, instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles = render_sidebar_parameters(is_midi_uploaded=(file_midi is not None))
+    
+    # Check if core parameters changed
+    enable_freq_limits = toggles.get('freq_limits', True)
+    if _check_and_invalidate_engine_cache(pitch_engine, instrument, switch_prob, enable_freq_limits):
+        st.session_state.pop('extracted_unp', None)
+        st.session_state.pop('extracted_plg', None)
+        st.session_state.pop('analysis_results_unplugged', None)
+        st.session_state.pop('analysis_results_plugged', None)
 
     # State Management
     if 'file_unplugged_name' not in st.session_state:
@@ -138,11 +162,11 @@ def main():
             enable_freq_limits = toggles.get('freq_limits', True)
             if file_unplugged is not None and 'extracted_unp' not in st.session_state:
                 with st.spinner("Extracting Pitch (Unplugged) using pYIN..."):
-                    st.session_state['extracted_unp'] = extract_pitch_and_rms(file_unplugged, instrument, switch_prob, enable_freq_limits)
+                    st.session_state['extracted_unp'] = extract_pitch_and_rms(file_unplugged, instrument, switch_prob, enable_freq_limits, pitch_engine=pitch_engine)
                     
             if file_plugged is not None and 'extracted_plg' not in st.session_state:
                 with st.spinner("Extracting Pitch (Plugged) using pYIN..."):
-                    st.session_state['extracted_plg'] = extract_pitch_and_rms(file_plugged, instrument, switch_prob, enable_freq_limits)
+                    st.session_state['extracted_plg'] = extract_pitch_and_rms(file_plugged, instrument, switch_prob, enable_freq_limits, pitch_engine=pitch_engine)
 
             if file_midi is not None and 'analysis_results_midi' not in st.session_state:
                 with st.spinner("Parsing MIDI Reference Sequence..."):
@@ -206,7 +230,7 @@ def main():
                     
                     if unp_ok:
                         st.write("**Unplugged Alignment:**")
-                        time_array_unp, expected_unp, warped_unp, expected_note_index_unp, folded_f0_hz_unp, folded_f0_midi_unp, strict_mask_unp = process_dtw_alignment(
+                        time_array_unp, expected_unp, warped_unp, expected_note_index_unp, folded_f0_hz_unp, folded_f0_midi_unp, strict_mask_unp, correction_array_unp = process_dtw_alignment(
                             midi_timing, res_unp['f0'], res_unp['y'], res_unp['sr'], res_unp['final_mask'], toggles, max_pitch_slope
                         )
                         
@@ -216,11 +240,11 @@ def main():
                         )
                         st.plotly_chart(fig_unp_dtw, use_container_width=True)
                         
-                        dtw_metrics_unp = calculate_dtw_metrics(midi_timing, time_array_unp, folded_f0_hz_unp, res_unp['rms'], res_unp['final_mask'], warped_unp)
+                        dtw_metrics_unp = calculate_dtw_metrics(midi_timing, time_array_unp, folded_f0_hz_unp, res_unp['rms'], res_unp['final_mask'], warped_unp, correction_array_unp)
                     
                     if plg_ok:
                         st.write("**Plugged Alignment:**")
-                        time_array_plg, expected_plg, warped_plg, expected_note_index_plg, folded_f0_hz_plg, folded_f0_midi_plg, strict_mask_plg = process_dtw_alignment(
+                        time_array_plg, expected_plg, warped_plg, expected_note_index_plg, folded_f0_hz_plg, folded_f0_midi_plg, strict_mask_plg, correction_array_plg = process_dtw_alignment(
                             midi_timing, res_plg['f0'], res_plg['y'], res_plg['sr'], res_plg['final_mask'], toggles, max_pitch_slope
                         )
                         
@@ -230,7 +254,7 @@ def main():
                         )
                         st.plotly_chart(fig_plg_dtw, use_container_width=True)
                         
-                        dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg)
+                        dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg, correction_array_plg)
                         
                     excluded_indices = render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg)
                     render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices)

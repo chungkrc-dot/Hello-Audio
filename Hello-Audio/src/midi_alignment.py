@@ -7,6 +7,21 @@ pitch boundaries, and extracting precise intonation metrics bound strictly to th
 """
 import numpy as np
 
+def is_note_excluded(note_dict):
+    """
+    Centralized logic for determining if a note should be excluded from summary metrics.
+    Excludes gross tracking errors (>100 cents) and notes where harmonic folding was applied.
+    """
+    dev_cents = note_dict.get("Deviation_Cents", float('nan'))
+    corr_applied = note_dict.get("Correction_Applied", False)
+    
+    if np.isnan(dev_cents):
+        return True # Missing note
+        
+    if abs(dev_cents) > 100 or corr_applied:
+        return True
+        
+    return False
 
 def get_midi_chroma(midi_notes, sr, hop_length):
     """
@@ -181,29 +196,64 @@ def apply_harmonic_folding(f0_hz, expected_midi_pitch):
     f0_midi = librosa.hz_to_midi(f0_hz)
     valid_mask = ~np.isnan(f0_midi) & ~np.isnan(expected_midi_pitch)
     
-    # 1. Octave Folding
+    # 1. Calculate raw deviation
+    raw_dev = np.zeros_like(f0_midi)
+    raw_dev[valid_mask] = f0_midi[valid_mask] - expected_midi_pitch[valid_mask]
+    
+    # Gate: only fold if absolute raw deviation >= 11.5 semitones
+    # This protects genuine performance errors (e.g., misplaying a 6th or 7th) from being masked as harmonic artifacts
+    fold_gate = valid_mask & (np.abs(raw_dev) >= 11.5)
+    
+    # Start with f0_midi_oct as the unfolded f0_midi
+    f0_midi_oct = np.copy(f0_midi)
+    
+    # 2. Octave Folding (only for those that pass the gate)
     octave_offsets = np.zeros_like(f0_midi)
-    octave_offsets[valid_mask] = np.round((f0_midi[valid_mask] - expected_midi_pitch[valid_mask]) / 12.0)
+    octave_offsets[fold_gate] = np.round(raw_dev[fold_gate] / 12.0)
     
-    f0_midi_oct = f0_midi - (octave_offsets * 12.0)
+    f0_midi_oct[fold_gate] = f0_midi[fold_gate] - (octave_offsets[fold_gate] * 12.0)
     
-    # 2. Harmonic Folding
+    # 3. Harmonic Folding (only for those that pass the gate)
+    # Recompute residual deviation after octave folding
     dev = np.zeros_like(f0_midi)
-    dev[valid_mask] = f0_midi_oct[valid_mask] - expected_midi_pitch[valid_mask]
+    dev[fold_gate] = f0_midi_oct[fold_gate] - expected_midi_pitch[fold_gate]
     
     # Perfect 5th confusion (e.g. 3rd, 6th harmonics) mathematically folds to around -5.0
-    is_fifth_harmonic = valid_mask & (dev >= -5.5) & (dev <= -4.5)
+    is_fifth_harmonic = fold_gate & (dev >= -5.5) & (dev <= -4.5)
     f0_midi_oct[is_fifth_harmonic] += 5.0
     
     # Major 3rd confusion (e.g. 5th harmonic) mathematically folds to around +4.0
-    is_third_harmonic = valid_mask & (dev >= 3.5) & (dev <= 4.5)
+    is_third_harmonic = fold_gate & (dev >= 3.5) & (dev <= 4.5)
     f0_midi_oct[is_third_harmonic] -= 4.0
     
     folded_f0_hz = librosa.midi_to_hz(f0_midi_oct)
     
-    return folded_f0_hz, f0_midi_oct
+    correction_array = np.full(len(f0_midi), "None", dtype=object)
+    for i in range(len(f0_midi)):
+        if not fold_gate[i]:
+            continue
+            
+        oct_val = int(np.abs(octave_offsets[i]))
+        is_5th = is_fifth_harmonic[i]
+        is_3rd = is_third_harmonic[i]
+        
+        if oct_val == 0 and not is_5th and not is_3rd:
+            continue
+            
+        parts = []
+        if oct_val > 0:
+            parts.append(f"Octave (x{oct_val})" if oct_val > 1 else "Octave")
+        
+        if is_5th:
+            parts.append("Perfect 5th")
+        elif is_3rd:
+            parts.append("Major 3rd")
+            
+        correction_array[i] = " + ".join(parts)
+    
+    return folded_f0_hz, f0_midi_oct, correction_array
 
-def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline):
+def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline, correction_array=None):
     """
     Extracts the final intonation and amplitude metrics for every note in the sequence.
     It isolates the exact temporal island of the note using the DTW warped timeline, 
@@ -250,6 +300,19 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
             # RMS in dBA
             median_rms_dba = median_rms_dbfs + librosa.A_weighting(median_f0)
             
+            # Correction logic
+            correction_applied = False
+            correction_type = "None"
+            if correction_array is not None:
+                note_corrections = correction_array[strict_note_mask]
+                # Filter out "None"
+                actual_corrections = [c for c in note_corrections if c != "None"]
+                if actual_corrections:
+                    from collections import Counter
+                    # Get the most common correction type in this note island
+                    correction_type = Counter(actual_corrections).most_common(1)[0][0]
+                    correction_applied = True
+            
             dtw_results.append({
                 'Note_Index': i + 1,
                 'Expected_Note': note_name,
@@ -258,7 +321,9 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
                 'Deviation_Cents': deviation_cents,
                 'Deviation_Hz': deviation_hz,
                 'Median_RMS_dBFS': median_rms_dbfs,
-                'Median_RMS_dBA': median_rms_dba
+                'Median_RMS_dBA': median_rms_dba,
+                'Correction_Applied': correction_applied,
+                'Correction_Type': correction_type
             })
         else:
             # Safeguard for completely empty arrays (Missed or completely filtered out)
@@ -270,7 +335,9 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
                 'Deviation_Cents': np.nan,
                 'Deviation_Hz': np.nan,
                 'Median_RMS_dBFS': np.nan,
-                'Median_RMS_dBA': np.nan
+                'Median_RMS_dBA': np.nan,
+                'Correction_Applied': False,
+                'Correction_Type': "None"
             })
             
     return dtw_results
@@ -293,10 +360,11 @@ def process_dtw_alignment(midi_timing, f0_hz, audio_y, sr, final_mask, toggles, 
     
     # 2. Harmonic Folding
     if toggles.get('harmonic_folding', True):
-        folded_f0_hz, folded_f0_midi = apply_harmonic_folding(f0_hz, expected_pitch)
+        folded_f0_hz, folded_f0_midi, correction_array = apply_harmonic_folding(f0_hz, expected_pitch)
     else:
         folded_f0_hz = f0_hz
         folded_f0_midi = librosa.hz_to_midi(folded_f0_hz)
+        correction_array = np.full(len(f0_hz), "None", dtype=object)
         
     # 3. Slope Mask Recalculation
     folded_pitch_slope = np.concatenate(([0], np.abs(np.diff(folded_f0_midi))))
@@ -308,5 +376,5 @@ def process_dtw_alignment(midi_timing, f0_hz, audio_y, sr, final_mask, toggles, 
     # 4. Strict Mask for visualization
     strict_mask = mask & final_mask & folded_slope_mask
     
-    return time_array, expected_pitch, warped_timeline, expected_note_index, folded_f0_hz, folded_f0_midi, strict_mask
+    return time_array, expected_pitch, warped_timeline, expected_note_index, folded_f0_hz, folded_f0_midi, strict_mask, correction_array
 

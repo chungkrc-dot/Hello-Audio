@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/Users/conradchung/Documents/PythonCode/Hello-Audio/tests/run_appendix_a.py", line 3, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'

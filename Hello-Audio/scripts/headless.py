@@ -3,6 +3,11 @@ import librosa
 import numpy as np
 import warnings
 
+import os
+import sys
+# Added path for scripts/ folder depth
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
 from src.midi_parser import parse_midi_with_timing
 from src.midi_alignment import get_alignment_mask, calculate_dtw_metrics, apply_harmonic_folding
@@ -25,7 +30,7 @@ def main():
     parser.add_argument("--no_duration_filter", action="store_true", help="Disable Sustain Duration Filter")
     parser.add_argument("--no_locked_target", action="store_true", help="Disable Locked Target Rule")
     parser.add_argument("--force_global", action="store_true", help="Force Global DTW Alignment")
-    parser.add_argument("--no_harmonic_folding", action="store_true", help="Disable Octave & Harmonic Folding")
+    parser.add_argument("--no_harmonic_folding", action="store_true", help="Disable Harmonic Folding (e.g., octaves, perfect 5ths)")
     
     args = parser.parse_args()
     
@@ -71,7 +76,7 @@ def main():
     
     if toggles['harmonic_folding']:
         print("Applying harmonic folding...")
-        folded_f0_hz, folded_f0_midi = apply_harmonic_folding(f0, expected)
+        folded_f0_hz, folded_f0_midi, _ = apply_harmonic_folding(f0, expected)
     else:
         folded_f0_hz = f0
         

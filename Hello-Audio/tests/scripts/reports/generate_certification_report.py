@@ -8,7 +8,8 @@ import librosa
 import matplotlib.pyplot as plt
 
 # Add root directory to sys path so we can import src modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from src.amplitude_analysis import analyze_amplitude
 from src.midi_alignment import apply_octave_folding, calculate_dtw_metrics

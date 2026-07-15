@@ -10,6 +10,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from itertools import zip_longest
+from src.midi_alignment import is_note_excluded
 
 def render_sidebar_parameters(is_midi_uploaded=False):
     """
@@ -17,9 +18,15 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     """
     st.sidebar.header("Pitch Analyser Parameters")
     
+    pitch_engine = st.sidebar.selectbox(
+        "Pitch Tracker Engine",
+        ["pYIN", "REAPER"],
+        help="Select the underlying pitch tracking algorithm. pYIN uses Hidden Markov Models, while REAPER uses Epoch tracking."
+    )
+    
     preset = st.sidebar.selectbox(
         "Analysis Profile (Legacy Mode)",
-        ["Custom (Manual Tuning)", "Rapid / Virtuosic", "Medium / Andante", "Slow / Legato"],
+        ["Engine Optimal Default", "Rapid / Virtuosic", "Medium / Andante", "Slow / Legato"],
         help="Select a standardized preset. Note: These presets primarily govern the Legacy Island Intonation logic. The DTW engine is robust enough to ignore tempo.",
         disabled=is_midi_uploaded
     )
@@ -34,7 +41,10 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         def_switch, def_rms, def_frames, def_slope = 0.005, 0.01, 5, 0.20
         disabled = True
     else:
-        def_switch, def_rms, def_frames, def_slope = 0.005, 0.005, 2, 0.5
+        if pitch_engine == "REAPER":
+            def_switch, def_rms, def_frames, def_slope = 0.005, 0.005, 4, 0.50
+        else:
+            def_switch, def_rms, def_frames, def_slope = 0.005, 0.005, 2, 0.50
         disabled = False
 
     disabled = False
@@ -52,8 +62,8 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         value=def_switch, 
         step=0.001,
         format="%.3f",
-        disabled=disabled,
-        help="Penalizes rapid toggling between voiced/unvoiced states. Lower values favor longer sustained notes. You can manually enter the value if needed."
+        disabled=disabled or (pitch_engine == "REAPER"),
+        help="Penalizes rapid toggling between voiced/unvoiced states. Lower values favor longer sustained notes. (Disabled when using REAPER)"
     )
 
     rms_threshold = st.sidebar.number_input(
@@ -97,7 +107,7 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     enable_slope_filter = st.sidebar.checkbox("Enable Pitch Slope Filter", value=True, help="Discard frames where pitch changes too rapidly.")
     enable_duration_filter = st.sidebar.checkbox("Enable Sustain Duration Filter", value=True, help="Discard pitch islands that are too short.")
     enable_locked_target = st.sidebar.checkbox("Enable Locked Target Rule", value=True, help="Lock legacy notes to their median semitone.")
-    enable_harmonic_folding = st.sidebar.checkbox("Enable Octave & Harmonic Folding", value=True, help="Fold octave and harmonic (e.g. perfect 5th) tracking errors to target note in DTW.")
+    enable_harmonic_folding = st.sidebar.checkbox("Enable Harmonic Folding", value=True, help="Fold harmonic (e.g., octaves, perfect 5ths) tracking errors to target note in DTW.")
     enable_force_global = st.sidebar.checkbox("Force Global DTW Alignment", value=True, help="Forces a strict 1:1 global DTW alignment, preventing path degeneracy on fast repetitive full performances.")
     
     toggles = {
@@ -109,7 +119,7 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         "force_global": enable_force_global
     }
     
-    return instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles
+    return pitch_engine, instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles
 
 def get_val(res_dict, key):
     """Helper to safely extract a value from the results dictionary."""
@@ -240,23 +250,36 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
         dev_hz_plg = np.nan
         include_val = True
         
+        # Determine if we should auto-exclude based on deviation
+        dev_cents_unp = dtw_metrics_unp[i]["Deviation_Cents"] if dtw_metrics_unp and i < len(dtw_metrics_unp) else np.nan
+        dev_cents_plg = dtw_metrics_plg[i]["Deviation_Cents"] if dtw_metrics_plg and i < len(dtw_metrics_plg) else np.nan
+        
+        # Determine if correction was applied
+        corr_unp = dtw_metrics_unp[i].get("Correction_Applied", False) if dtw_metrics_unp and i < len(dtw_metrics_unp) else False
+        corr_plg = dtw_metrics_plg[i].get("Correction_Applied", False) if dtw_metrics_plg and i < len(dtw_metrics_plg) else False
+        
+        corr_type_unp = dtw_metrics_unp[i].get("Correction_Type", "None") if dtw_metrics_unp and i < len(dtw_metrics_unp) else "None"
+        corr_type_plg = dtw_metrics_plg[i].get("Correction_Type", "None") if dtw_metrics_plg and i < len(dtw_metrics_plg) else "None"
+        
+        if auto_exclude:
+            unp_excl = is_note_excluded(dtw_metrics_unp[i]) if dtw_metrics_unp and i < len(dtw_metrics_unp) else False
+            plg_excl = is_note_excluded(dtw_metrics_plg[i]) if dtw_metrics_plg and i < len(dtw_metrics_plg) else False
+            if unp_excl or plg_excl:
+                include_val = False
+        
         if dtw_metrics_unp and i < len(dtw_metrics_unp):
             unp_note = dtw_metrics_unp[i]
             row["Unplugged Dev (Hz)"] = unp_note["Deviation_Hz"]
             row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
+            row["Unplugged Correction"] = corr_type_unp if corr_unp else ""
             dev_hz_unp = unp_note["Deviation_Hz"]
-            
-            if auto_exclude and abs(unp_note["Deviation_Cents"]) > 100:
-                include_val = False
             
         if dtw_metrics_plg and i < len(dtw_metrics_plg):
             plg_note = dtw_metrics_plg[i]
             row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
             row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
+            row["Plugged Correction"] = corr_type_plg if corr_plg else ""
             dev_hz_plg = plg_note["Deviation_Hz"]
-            
-            if auto_exclude and abs(plg_note["Deviation_Cents"]) > 100:
-                include_val = False
             
         if dtw_metrics_unp and dtw_metrics_plg:
             row["Delta Dev (Unplugged - Plugged)"] = dev_hz_unp - dev_hz_plg
