@@ -27,7 +27,7 @@ warnings.filterwarnings('ignore')
 
 # Add root directory to sys path so we can import src modules
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
 from src.midi_parser import parse_midi_with_timing, get_midi_tempo
@@ -53,15 +53,15 @@ def main():
     print("No duration cap (full-length tracks)")
     print("=" * 70)
     
-    dataset_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../dataset')))
+    dataset_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../dataset (Strings only)')))
     tests_dir = Path(os.path.abspath(os.path.dirname(__file__)))
     
     if not dataset_dir.exists():
         print(f"Error: Dataset directory not found at {dataset_dir}")
         sys.exit(1)
         
-    # Output to a batch_results subdirectory inside tests/
-    output_dir = tests_dir / "batch_results"
+    # Output to a batch_results subdirectory inside tests/outputs/
+    output_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../outputs/batch_results')))
     output_dir.mkdir(exist_ok=True)
         
     out_csv = output_dir / "appendix_a_results.csv"
@@ -148,6 +148,12 @@ def main():
         # NO duration cap — process full track to match original Appendix A methodology
         with open(midi_path, 'rb') as f:
             midi_notes = parse_midi_with_timing(f, target_track=target_track)
+            if not midi_notes:
+                f.seek(0)
+                midi_notes = parse_midi_with_timing(f, target_track=0)
+            if not midi_notes:
+                f.seek(0)
+                midi_notes = parse_midi_with_timing(f, target_track=1)
             
         if not midi_notes:
             print(f"  [!] No valid notes found in Track {target_track}")

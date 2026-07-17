@@ -48,7 +48,7 @@ def test_condition(base_audio, instrument, engine, cents, tempdir):
 
 def main():
     warnings.filterwarnings('ignore')
-    base_audio = "dataset/02_Sonata_vn_vn/1_vn/AuSep_1_vn_02_Sonata.wav"
+    base_audio = "dataset (Strings only)/02_Sonata_vn_vn/1_vn/AuSep_1_vn_02_Sonata.wav"
     instrument = "Violin"
     
     conditions = [25.0, 50.0, -25.0, -50.0]

@@ -50,6 +50,7 @@ def main():
     st.set_page_config(page_title="Hello-Audio", layout="wide")
     
     st.title("Hello-Audio")
+    st.warning("**Dataset & Instrument Caveat:** Hello-Audio is primarily designed, parameterized, and tested using the relevant instrument samples from the URMP dataset. As such, the application in its current state is strictly validated for **Violin, Viola, and Cello**. It should not be used to analyze other instruments without further calibration.")
     st.write("""
     This application comparatively analyzes the amplitude and intonation of uploaded audio recordings. 
     It uses the pYIN algorithm combined with strict Pitch Analyser Parameters (configured in the sidebar) to isolate clean, steady-state notes while aggressively filtering out transients, glissandos, and background noise.

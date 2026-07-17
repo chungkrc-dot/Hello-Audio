@@ -52,11 +52,11 @@ def main():
     warnings.filterwarnings('ignore')
     
     datasets = {
-        "Violin 1": "dataset/44_K515_vn_vn_va_va_vc/1_vn/AuSep_1_vn_44_K515.wav",
-        "Violin 2": "dataset/44_K515_vn_vn_va_va_vc/2_vn/AuSep_2_vn_44_K515.wav",
-        "Viola 1": "dataset/44_K515_vn_vn_va_va_vc/3_va/AuSep_3_va_44_K515.wav",
-        "Viola 2": "dataset/44_K515_vn_vn_va_va_vc/4_va/AuSep_4_va_44_K515.wav",
-        "Cello": "dataset/44_K515_vn_vn_va_va_vc/5_vc/AuSep_5_vc_44_K515.wav"
+        "Violin 1": "dataset (Strings only)/44_K515_vn_vn_va_va_vc/1_vn/AuSep_1_vn_44_K515.wav",
+        "Violin 2": "dataset (Strings only)/44_K515_vn_vn_va_va_vc/2_vn/AuSep_2_vn_44_K515.wav",
+        "Viola 1": "dataset (Strings only)/44_K515_vn_vn_va_va_vc/3_va/AuSep_3_va_44_K515.wav",
+        "Viola 2": "dataset (Strings only)/44_K515_vn_vn_va_va_vc/4_va/AuSep_4_va_44_K515.wav",
+        "Cello": "dataset (Strings only)/44_K515_vn_vn_va_va_vc/5_vc/AuSep_5_vc_44_K515.wav"
     }
     
     conditions = [25.0, -25.0, 50.0, -50.0]

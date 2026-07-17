@@ -109,6 +109,7 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     enable_locked_target = st.sidebar.checkbox("Enable Locked Target Rule", value=True, help="Lock legacy notes to their median semitone.")
     enable_harmonic_folding = st.sidebar.checkbox("Enable Harmonic Folding", value=True, help="Fold harmonic (e.g., octaves, perfect 5ths) tracking errors to target note in DTW.")
     enable_force_global = st.sidebar.checkbox("Force Global DTW Alignment", value=True, help="Forces a strict 1:1 global DTW alignment, preventing path degeneracy on fast repetitive full performances.")
+    enable_adaptive_rms = st.sidebar.checkbox("Enable Adaptive RMS Threshold", value=True, help="Dynamically adjust the RMS threshold based on the recording's 10th percentile noise floor.")
     
     toggles = {
         "freq_limits": enable_freq_limits,
@@ -116,7 +117,8 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         "duration_filter": enable_duration_filter,
         "locked_target": enable_locked_target,
         "harmonic_folding": enable_harmonic_folding,
-        "force_global": enable_force_global
+        "force_global": enable_force_global,
+        "adaptive_rms": enable_adaptive_rms
     }
     
     return pitch_engine, instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles
@@ -269,6 +271,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
         
         if dtw_metrics_unp and i < len(dtw_metrics_unp):
             unp_note = dtw_metrics_unp[i]
+            row["Unplugged Detected (Hz)"] = unp_note["Median_Detected_Pitch_Hz"]
             row["Unplugged Dev (Hz)"] = unp_note["Deviation_Hz"]
             row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
             row["Unplugged Correction"] = corr_type_unp if corr_unp else ""
@@ -276,6 +279,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
             
         if dtw_metrics_plg and i < len(dtw_metrics_plg):
             plg_note = dtw_metrics_plg[i]
+            row["Plugged Detected (Hz)"] = plg_note["Median_Detected_Pitch_Hz"]
             row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
             row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
             row["Plugged Correction"] = corr_type_plg if corr_plg else ""

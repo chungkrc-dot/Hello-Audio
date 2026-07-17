@@ -1,0 +1,144 @@
+URMP String Instruments Summary
+===============================
+
+Total counts across all pieces:
+-------------------------------
+Violin (vn): 34
+Viola (va):  13
+Cello (vc):  11
+Total:       58
+
+Counts per piece:
+-----------------
+01_Jupiter_vn_vc:
+  Violins: 1
+  Violas:  0
+  Cellos:  1
+  Total string parts: 2
+
+02_Sonata_vn_vn:
+  Violins: 2
+  Violas:  0
+  Cellos:  0
+  Total string parts: 2
+
+08_Spring_fl_vn:
+  Violins: 1
+  Violas:  0
+  Cellos:  0
+  Total string parts: 1
+
+09_Jesus_tpt_vn:
+  Violins: 1
+  Violas:  0
+  Cellos:  0
+  Total string parts: 1
+
+11_Maria_ob_vc:
+  Violins: 0
+  Violas:  0
+  Cellos:  1
+  Total string parts: 1
+
+12_Spring_vn_vn_vc:
+  Violins: 2
+  Violas:  0
+  Cellos:  1
+  Total string parts: 3
+
+13_Hark_vn_vn_va:
+  Violins: 2
+  Violas:  1
+  Cellos:  0
+  Total string parts: 3
+
+17_Nocturne_vn_fl_cl:
+  Violins: 1
+  Violas:  0
+  Cellos:  0
+  Total string parts: 1
+
+18_Nocturne_vn_fl_tpt:
+  Violins: 1
+  Violas:  0
+  Cellos:  0
+  Total string parts: 1
+
+19_Pavane_cl_vn_vc:
+  Violins: 1
+  Violas:  0
+  Cellos:  1
+  Total string parts: 2
+
+20_Pavane_tpt_vn_vc:
+  Violins: 1
+  Violas:  0
+  Cellos:  1
+  Total string parts: 2
+
+24_Pirates_vn_vn_va_vc:
+  Violins: 2
+  Violas:  1
+  Cellos:  1
+  Total string parts: 4
+
+25_Pirates_vn_vn_va_sax:
+  Violins: 2
+  Violas:  1
+  Cellos:  0
+  Total string parts: 3
+
+26_King_vn_vn_va_vc:
+  Violins: 2
+  Violas:  1
+  Cellos:  1
+  Total string parts: 4
+
+27_King_vn_vn_va_sax:
+  Violins: 2
+  Violas:  1
+  Cellos:  0
+  Total string parts: 3
+
+32_Fugue_vn_vn_va_vc:
+  Violins: 2
+  Violas:  1
+  Cellos:  1
+  Total string parts: 4
+
+35_Rondeau_vn_vn_va_db:
+  Violins: 2
+  Violas:  1
+  Cellos:  0
+  Total string parts: 3
+
+36_Rondeau_vn_vn_va_vc:
+  Violins: 2
+  Violas:  1
+  Cellos:  1
+  Total string parts: 4
+
+37_Rondeau_fl_vn_va_cl:
+  Violins: 1
+  Violas:  1
+  Cellos:  0
+  Total string parts: 2
+
+38_Jerusalem_vn_vn_va_vc_db:
+  Violins: 2
+  Violas:  1
+  Cellos:  1
+  Total string parts: 4
+
+39_Jerusalem_vn_vn_va_sax_db:
+  Violins: 2
+  Violas:  1
+  Cellos:  0
+  Total string parts: 3
+
+44_K515_vn_vn_va_va_vc:
+  Violins: 2
+  Violas:  2
+  Cellos:  1
+  Total string parts: 5
+

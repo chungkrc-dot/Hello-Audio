@@ -217,9 +217,17 @@ def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_fram
     enable_slope_filter = toggles.get('slope_filter', True)
     enable_duration_filter = toggles.get('duration_filter', True)
     enable_locked_target = toggles.get('locked_target', True)
+    enable_adaptive_rms = toggles.get('adaptive_rms', True)
+
+    # 1. Adaptive Noise Thresholding
+    if enable_adaptive_rms and len(rms) > 0:
+        noise_floor = np.percentile(rms, 10)
+        effective_rms_threshold = max(rms_threshold, noise_floor * 2.0)
+    else:
+        effective_rms_threshold = rms_threshold
 
     # 2. Filtering
-    combined_mask = generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope, enable_slope_filter)
+    combined_mask = generate_filters(f0, voiced_flag, rms, effective_rms_threshold, max_pitch_slope, enable_slope_filter)
     final_mask = apply_duration_filter(combined_mask, min_frames, enable_duration_filter)
     
     # 3. Metrics Calculation

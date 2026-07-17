@@ -15,7 +15,7 @@ def main():
     
     warnings.filterwarnings('ignore')
     
-    base_audio = "dataset/02_Sonata_vn_vn/1_vn/AuSep_1_vn_02_Sonata.wav"
+    base_audio = "dataset (Strings only)/02_Sonata_vn_vn/1_vn/AuSep_1_vn_02_Sonata.wav"
     instrument = "Violin"
     engine = "REAPER"
     

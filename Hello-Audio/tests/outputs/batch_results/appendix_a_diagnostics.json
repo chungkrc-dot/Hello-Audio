@@ -363,8 +363,8 @@
     {
       "Note_Index": 37,
       "Expected_Note": "A4",
-      "Deviation_Cents": -6.15,
-      "Deviation_Hz": -1.56,
+      "Deviation_Cents": 17.4,
+      "Deviation_Hz": 4.44,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -463,12 +463,12 @@
     {
       "Note_Index": 47,
       "Expected_Note": "F\u266f5",
-      "Deviation_Cents": -30.0,
-      "Deviation_Hz": -12.71,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Deviation_Cents": -30.01,
+      "Deviation_Hz": -12.72,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 48,
@@ -1265,8 +1265,8 @@
     {
       "Note_Index": 35,
       "Expected_Note": "B4",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.43,
+      "Deviation_Cents": 0.0,
+      "Deviation_Hz": 0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -1535,8 +1535,8 @@
     {
       "Note_Index": 62,
       "Expected_Note": "E5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.82,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 7.66,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -1635,8 +1635,8 @@
     {
       "Note_Index": 72,
       "Expected_Note": "F\u266f5",
-      "Deviation_Cents": 30.0,
-      "Deviation_Hz": 12.93,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 8.6,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -20639,12 +20639,12 @@
     {
       "Note_Index": 21,
       "Expected_Note": "E5",
-      "Deviation_Cents": 493.52,
-      "Deviation_Hz": 217.46,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave (x2)",
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
       "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 22,
@@ -20691,30 +20691,30 @@
       "Expected_Note": "F5",
       "Deviation_Cents": -6.96,
       "Deviation_Hz": -2.8,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave (x2)",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 27,
       "Expected_Note": "A\u266f4",
       "Deviation_Cents": 16.35,
       "Deviation_Hz": 4.42,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 28,
       "Expected_Note": "D5",
-      "Deviation_Cents": 556.77,
-      "Deviation_Hz": 222.8,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave (x2)",
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
       "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 29,
@@ -21089,12 +21089,12 @@
     {
       "Note_Index": 66,
       "Expected_Note": "D5",
-      "Deviation_Cents": 15.44,
-      "Deviation_Hz": 5.26,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 67,
@@ -21119,12 +21119,12 @@
     {
       "Note_Index": 69,
       "Expected_Note": "D5",
-      "Deviation_Cents": 15.44,
-      "Deviation_Hz": 5.26,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
       "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 70,
@@ -21319,12 +21319,12 @@
     {
       "Note_Index": 89,
       "Expected_Note": "E5",
-      "Deviation_Cents": 19.35,
-      "Deviation_Hz": 7.41,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 90,
@@ -21409,12 +21409,12 @@
     {
       "Note_Index": 98,
       "Expected_Note": "E5",
-      "Deviation_Cents": 19.35,
-      "Deviation_Hz": 7.41,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 99,
@@ -22229,12 +22229,12 @@
     {
       "Note_Index": 180,
       "Expected_Note": "A5",
-      "Deviation_Cents": -6.48,
-      "Deviation_Hz": -3.29,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave (x2)",
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
       "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 181,
@@ -22629,8 +22629,8 @@
     {
       "Note_Index": 220,
       "Expected_Note": "A5",
-      "Deviation_Cents": -6.48,
-      "Deviation_Hz": -3.29,
+      "Deviation_Cents": 17.4,
+      "Deviation_Hz": 8.89,
       "Correction_Applied": true,
       "Correction_Type": "Octave (x2)",
       "Excluded": true,
@@ -22831,10 +22831,10 @@
       "Expected_Note": "D5",
       "Deviation_Cents": 15.44,
       "Deviation_Hz": 5.26,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 241,
@@ -22921,10 +22921,10 @@
       "Expected_Note": "D5",
       "Deviation_Cents": 15.44,
       "Deviation_Hz": 5.26,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 250,
@@ -22969,8 +22969,8 @@
     {
       "Note_Index": 254,
       "Expected_Note": "A\u266f5",
-      "Deviation_Cents": 29.23,
-      "Deviation_Hz": 15.87,
+      "Deviation_Cents": 42.0,
+      "Deviation_Hz": 22.9,
       "Correction_Applied": true,
       "Correction_Type": "Octave (x2)",
       "Excluded": true,
@@ -22999,12 +22999,12 @@
     {
       "Note_Index": 257,
       "Expected_Note": "E5",
-      "Deviation_Cents": 272.62,
-      "Deviation_Hz": 112.43,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave (x2)",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Deviation_Cents": 19.35,
+      "Deviation_Hz": 7.41,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 258,
@@ -23209,12 +23209,12 @@
     {
       "Note_Index": 278,
       "Expected_Note": "E5",
-      "Deviation_Cents": 19.35,
-      "Deviation_Hz": 7.41,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 279,
@@ -23369,22 +23369,22 @@
     {
       "Note_Index": 294,
       "Expected_Note": "D5",
-      "Deviation_Cents": 15.44,
-      "Deviation_Hz": 5.26,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 295,
       "Expected_Note": "C5",
-      "Deviation_Cents": 33.04,
-      "Deviation_Hz": 10.08,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 296,
@@ -23469,8 +23469,8 @@
     {
       "Note_Index": 304,
       "Expected_Note": "B4",
-      "Deviation_Cents": -4.92,
-      "Deviation_Hz": -1.4,
+      "Deviation_Cents": 8.25,
+      "Deviation_Hz": 2.36,
       "Correction_Applied": true,
       "Correction_Type": "Octave",
       "Excluded": true,
@@ -23619,8 +23619,8 @@
     {
       "Note_Index": 319,
       "Expected_Note": "C5",
-      "Deviation_Cents": -23.72,
-      "Deviation_Hz": -7.12,
+      "Deviation_Cents": 33.04,
+      "Deviation_Hz": 10.08,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -23659,12 +23659,12 @@
     {
       "Note_Index": 323,
       "Expected_Note": "F5",
-      "Deviation_Cents": -6.96,
-      "Deviation_Hz": -2.8,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 324,
@@ -24009,12 +24009,12 @@
     {
       "Note_Index": 358,
       "Expected_Note": "F5",
-      "Deviation_Cents": -6.96,
-      "Deviation_Hz": -2.8,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 359,
@@ -24049,12 +24049,12 @@
     {
       "Note_Index": 362,
       "Expected_Note": "D5",
-      "Deviation_Cents": 15.44,
-      "Deviation_Hz": 5.26,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 363,
@@ -24299,8 +24299,8 @@
     {
       "Note_Index": 387,
       "Expected_Note": "C5",
-      "Deviation_Cents": -23.73,
-      "Deviation_Hz": -7.12,
+      "Deviation_Cents": 33.03,
+      "Deviation_Hz": 10.08,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -24321,20 +24321,20 @@
       "Expected_Note": "A4",
       "Deviation_Cents": 17.4,
       "Deviation_Hz": 4.44,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 390,
       "Expected_Note": "E5",
       "Deviation_Cents": 19.35,
       "Deviation_Hz": 7.41,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave (x2)",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 391,
@@ -24689,12 +24689,12 @@
     {
       "Note_Index": 426,
       "Expected_Note": "F5",
-      "Deviation_Cents": 69.99,
-      "Deviation_Hz": 28.82,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 427,
@@ -24709,8 +24709,8 @@
     {
       "Note_Index": 428,
       "Expected_Note": "A5",
-      "Deviation_Cents": -6.48,
-      "Deviation_Hz": -3.29,
+      "Deviation_Cents": 17.4,
+      "Deviation_Hz": 8.89,
       "Correction_Applied": true,
       "Correction_Type": "Octave (x2)",
       "Excluded": true,
@@ -24859,12 +24859,12 @@
     {
       "Note_Index": 443,
       "Expected_Note": "A5",
-      "Deviation_Cents": -406.96,
-      "Deviation_Hz": -184.35,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": true,
-      "Exclusion_Reason": ">100_cents"
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 444,
@@ -24881,10 +24881,10 @@
       "Expected_Note": "D5",
       "Deviation_Cents": 15.44,
       "Deviation_Hz": 5.26,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
-      "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Correction_Applied": false,
+      "Correction_Type": "None",
+      "Excluded": false,
+      "Exclusion_Reason": "included"
     },
     {
       "Note_Index": 446,
@@ -24979,12 +24979,12 @@
     {
       "Note_Index": 455,
       "Expected_Note": "A\u266f4",
-      "Deviation_Cents": 16.35,
-      "Deviation_Hz": 4.42,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 456,
@@ -25059,32 +25059,32 @@
     {
       "Note_Index": 463,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": 21.84,
-      "Deviation_Hz": 7.04,
-      "Correction_Applied": true,
-      "Correction_Type": "Octave",
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
+      "Correction_Applied": false,
+      "Correction_Type": "None",
       "Excluded": true,
-      "Exclusion_Reason": "Correction_Applied"
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 464,
       "Expected_Note": "E5",
-      "Deviation_Cents": 19.35,
-      "Deviation_Hz": 7.41,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 465,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": -8.27,
-      "Deviation_Hz": -2.64,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 466,
@@ -25099,8 +25099,8 @@
     {
       "Note_Index": 467,
       "Expected_Note": "F5",
-      "Deviation_Cents": 516.35,
-      "Deviation_Hz": 242.72,
+      "Deviation_Cents": 491.08,
+      "Deviation_Hz": 229.08,
       "Correction_Applied": true,
       "Correction_Type": "Octave (x2)",
       "Excluded": true,
@@ -25451,8 +25451,8 @@
     {
       "Note_Index": 18,
       "Expected_Note": "A\u266f5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 5.4,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 10.83,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -25631,18 +25631,18 @@
     {
       "Note_Index": 36,
       "Expected_Note": "E5",
-      "Deviation_Cents": -10.0,
-      "Deviation_Hz": -3.8,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 37,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": 50.0,
-      "Deviation_Hz": 16.24,
+      "Deviation_Cents": 55.01,
+      "Deviation_Hz": 17.9,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -25751,18 +25751,18 @@
     {
       "Note_Index": 48,
       "Expected_Note": "E5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 49,
       "Expected_Note": "D5",
-      "Deviation_Cents": 15.01,
-      "Deviation_Hz": 5.11,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 6.82,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -25931,12 +25931,12 @@
     {
       "Note_Index": 66,
       "Expected_Note": "D5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 67,
@@ -26051,8 +26051,8 @@
     {
       "Note_Index": 78,
       "Expected_Note": "G5",
-      "Deviation_Cents": -20.0,
-      "Deviation_Hz": -9.0,
+      "Deviation_Cents": -14.99,
+      "Deviation_Hz": -6.76,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26081,8 +26081,8 @@
     {
       "Note_Index": 81,
       "Expected_Note": "A5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 5.1,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26161,12 +26161,12 @@
     {
       "Note_Index": 89,
       "Expected_Note": "E5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 90,
@@ -26201,8 +26201,8 @@
     {
       "Note_Index": 93,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": 20.0,
-      "Deviation_Hz": 6.44,
+      "Deviation_Cents": 25.01,
+      "Deviation_Hz": 8.07,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26251,18 +26251,18 @@
     {
       "Note_Index": 98,
       "Expected_Note": "E5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 99,
       "Expected_Note": "D5",
-      "Deviation_Cents": -10.0,
-      "Deviation_Hz": -3.38,
+      "Deviation_Cents": 0.0,
+      "Deviation_Hz": 0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26341,8 +26341,8 @@
     {
       "Note_Index": 107,
       "Expected_Note": "D5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.7,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 3.4,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26361,8 +26361,8 @@
     {
       "Note_Index": 109,
       "Expected_Note": "D5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.7,
+      "Deviation_Cents": 0.0,
+      "Deviation_Hz": 0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26371,12 +26371,12 @@
     {
       "Note_Index": 110,
       "Expected_Note": "E5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.91,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 111,
@@ -26391,8 +26391,8 @@
     {
       "Note_Index": 112,
       "Expected_Note": "D5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": -10.0,
+      "Deviation_Hz": -3.38,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26441,8 +26441,8 @@
     {
       "Note_Index": 117,
       "Expected_Note": "G5",
-      "Deviation_Cents": 40.0,
-      "Deviation_Hz": 18.32,
+      "Deviation_Cents": 30.0,
+      "Deviation_Hz": 13.7,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26481,8 +26481,8 @@
     {
       "Note_Index": 121,
       "Expected_Note": "G5",
-      "Deviation_Cents": 35.01,
-      "Deviation_Hz": 16.01,
+      "Deviation_Cents": 40.0,
+      "Deviation_Hz": 18.32,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26611,8 +26611,8 @@
     {
       "Note_Index": 134,
       "Expected_Note": "A\u266f4",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.35,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 2.7,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -26681,8 +26681,8 @@
     {
       "Note_Index": 141,
       "Expected_Note": "E5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 3.82,
       "Correction_Applied": true,
       "Correction_Type": "Octave",
       "Excluded": true,
@@ -26821,8 +26821,8 @@
     {
       "Note_Index": 155,
       "Expected_Note": "E5",
-      "Deviation_Cents": -4.99,
-      "Deviation_Hz": -1.9,
+      "Deviation_Cents": -0.0,
+      "Deviation_Hz": -0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27161,8 +27161,8 @@
     {
       "Note_Index": 189,
       "Expected_Note": "G5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": -4.99,
+      "Deviation_Hz": -2.26,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27291,8 +27291,8 @@
     {
       "Note_Index": 202,
       "Expected_Note": "F5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 4.05,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27311,8 +27311,8 @@
     {
       "Note_Index": 204,
       "Expected_Note": "D5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.7,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 3.4,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27361,8 +27361,8 @@
     {
       "Note_Index": 209,
       "Expected_Note": "C5",
-      "Deviation_Cents": 15.01,
-      "Deviation_Hz": 4.56,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 6.08,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27381,8 +27381,8 @@
     {
       "Note_Index": 211,
       "Expected_Note": "G5",
-      "Deviation_Cents": 25.01,
-      "Deviation_Hz": 11.41,
+      "Deviation_Cents": 30.0,
+      "Deviation_Hz": 13.7,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27441,8 +27441,8 @@
     {
       "Note_Index": 217,
       "Expected_Note": "E5",
-      "Deviation_Cents": -10.0,
-      "Deviation_Hz": -3.8,
+      "Deviation_Cents": -0.0,
+      "Deviation_Hz": -0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27451,8 +27451,8 @@
     {
       "Note_Index": 218,
       "Expected_Note": "D5",
-      "Deviation_Cents": 15.01,
-      "Deviation_Hz": 5.11,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 3.4,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27561,12 +27561,12 @@
     {
       "Note_Index": 229,
       "Expected_Note": "G5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 230,
@@ -27581,8 +27581,8 @@
     {
       "Note_Index": 231,
       "Expected_Note": "F5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.05,
+      "Deviation_Cents": 5.01,
+      "Deviation_Hz": 2.02,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27631,8 +27631,8 @@
     {
       "Note_Index": 236,
       "Expected_Note": "F5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.05,
+      "Deviation_Cents": 0.0,
+      "Deviation_Hz": 0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27731,8 +27731,8 @@
     {
       "Note_Index": 246,
       "Expected_Note": "D5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 5.01,
+      "Deviation_Hz": 1.7,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27751,8 +27751,8 @@
     {
       "Note_Index": 248,
       "Expected_Note": "A5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 5.1,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27781,8 +27781,8 @@
     {
       "Note_Index": 251,
       "Expected_Note": "A5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 5.1,
+      "Deviation_Cents": 15.01,
+      "Deviation_Hz": 7.66,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27811,8 +27811,8 @@
     {
       "Note_Index": 254,
       "Expected_Note": "A\u266f5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 5.4,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 10.83,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27951,8 +27951,8 @@
     {
       "Note_Index": 268,
       "Expected_Note": "G5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.54,
+      "Deviation_Cents": 15.01,
+      "Deviation_Hz": 6.83,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -27961,8 +27961,8 @@
     {
       "Note_Index": 269,
       "Expected_Note": "E5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.91,
+      "Deviation_Cents": -10.0,
+      "Deviation_Hz": -3.8,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28001,8 +28001,8 @@
     {
       "Note_Index": 273,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.21,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 6.44,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28031,8 +28031,8 @@
     {
       "Note_Index": 276,
       "Expected_Note": "E5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 3.82,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28081,8 +28081,8 @@
     {
       "Note_Index": 281,
       "Expected_Note": "F5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": -10.0,
+      "Deviation_Hz": -4.02,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28191,8 +28191,8 @@
     {
       "Note_Index": 292,
       "Expected_Note": "D5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.4,
+      "Deviation_Cents": 5.01,
+      "Deviation_Hz": 1.7,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28211,12 +28211,12 @@
     {
       "Note_Index": 294,
       "Expected_Note": "D5",
-      "Deviation_Cents": 20.0,
-      "Deviation_Hz": 6.82,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 295,
@@ -28251,28 +28251,28 @@
     {
       "Note_Index": 298,
       "Expected_Note": "F5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.05,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 299,
       "Expected_Note": "E5",
-      "Deviation_Cents": -4.99,
-      "Deviation_Hz": -1.9,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 300,
       "Expected_Note": "D5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.4,
+      "Deviation_Cents": 15.01,
+      "Deviation_Hz": 5.11,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28331,8 +28331,8 @@
     {
       "Note_Index": 306,
       "Expected_Note": "D5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 5.01,
+      "Deviation_Hz": 1.7,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28421,8 +28421,8 @@
     {
       "Note_Index": 315,
       "Expected_Note": "E5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.82,
+      "Deviation_Cents": 15.01,
+      "Deviation_Hz": 5.74,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28451,8 +28451,8 @@
     {
       "Note_Index": 318,
       "Expected_Note": "D5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.4,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 6.82,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28461,8 +28461,8 @@
     {
       "Note_Index": 319,
       "Expected_Note": "C5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.52,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 3.03,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28501,8 +28501,8 @@
     {
       "Note_Index": 323,
       "Expected_Note": "F5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 2.02,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 4.05,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28671,8 +28671,8 @@
     {
       "Note_Index": 340,
       "Expected_Note": "E5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.82,
+      "Deviation_Cents": -0.0,
+      "Deviation_Hz": -0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28721,8 +28721,8 @@
     {
       "Note_Index": 345,
       "Expected_Note": "A5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 2.55,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 5.1,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28771,8 +28771,8 @@
     {
       "Note_Index": 350,
       "Expected_Note": "G5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.54,
+      "Deviation_Cents": 5.01,
+      "Deviation_Hz": 2.27,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28831,12 +28831,12 @@
     {
       "Note_Index": 356,
       "Expected_Note": "A5",
-      "Deviation_Cents": -100.0,
-      "Deviation_Hz": -49.39,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 357,
@@ -28851,12 +28851,12 @@
     {
       "Note_Index": 358,
       "Expected_Note": "F5",
-      "Deviation_Cents": 20.0,
-      "Deviation_Hz": 8.12,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 359,
@@ -28871,8 +28871,8 @@
     {
       "Note_Index": 360,
       "Expected_Note": "A5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 5.1,
+      "Deviation_Cents": 0.0,
+      "Deviation_Hz": 0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -28891,12 +28891,12 @@
     {
       "Note_Index": 362,
       "Expected_Note": "D5",
-      "Deviation_Cents": 25.01,
-      "Deviation_Hz": 8.55,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 363,
@@ -28941,12 +28941,12 @@
     {
       "Note_Index": 367,
       "Expected_Note": "E5",
-      "Deviation_Cents": -10.0,
-      "Deviation_Hz": -3.8,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 368,
@@ -28961,8 +28961,8 @@
     {
       "Note_Index": 369,
       "Expected_Note": "C5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 3.03,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 6.08,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29141,8 +29141,8 @@
     {
       "Note_Index": 387,
       "Expected_Note": "C5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 5.01,
+      "Deviation_Hz": 1.52,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29481,8 +29481,8 @@
     {
       "Note_Index": 421,
       "Expected_Note": "G5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.54,
+      "Deviation_Cents": 60.0,
+      "Deviation_Hz": 27.65,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29501,32 +29501,32 @@
     {
       "Note_Index": 423,
       "Expected_Note": "G5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.54,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 424,
       "Expected_Note": "A5",
-      "Deviation_Cents": -70.0,
-      "Deviation_Hz": -34.87,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 425,
       "Expected_Note": "G5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": null,
+      "Deviation_Hz": null,
       "Correction_Applied": false,
       "Correction_Type": "None",
-      "Excluded": false,
-      "Exclusion_Reason": "included"
+      "Excluded": true,
+      "Exclusion_Reason": "NaN/missed"
     },
     {
       "Note_Index": 426,
@@ -29541,8 +29541,8 @@
     {
       "Note_Index": 427,
       "Expected_Note": "G5",
-      "Deviation_Cents": 10.0,
-      "Deviation_Hz": 4.54,
+      "Deviation_Cents": 20.0,
+      "Deviation_Hz": 9.11,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29611,8 +29611,8 @@
     {
       "Note_Index": 434,
       "Expected_Note": "F5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 4.05,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29621,8 +29621,8 @@
     {
       "Note_Index": 435,
       "Expected_Note": "G5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": -4.99,
+      "Deviation_Hz": -2.26,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29671,8 +29671,8 @@
     {
       "Note_Index": 440,
       "Expected_Note": "A5",
-      "Deviation_Cents": 0.0,
-      "Deviation_Hz": 0.0,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 5.1,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29741,8 +29741,8 @@
     {
       "Note_Index": 447,
       "Expected_Note": "G5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": -10.0,
+      "Deviation_Hz": -4.52,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29801,8 +29801,8 @@
     {
       "Note_Index": 453,
       "Expected_Note": "A5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 2.55,
+      "Deviation_Cents": 10.0,
+      "Deviation_Hz": 5.1,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29871,8 +29871,8 @@
     {
       "Note_Index": 460,
       "Expected_Note": "G5",
-      "Deviation_Cents": -0.0,
-      "Deviation_Hz": -0.0,
+      "Deviation_Cents": -10.0,
+      "Deviation_Hz": -4.52,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -29991,8 +29991,8 @@
     {
       "Note_Index": 472,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": 5.01,
-      "Deviation_Hz": 1.61,
+      "Deviation_Cents": -0.0,
+      "Deviation_Hz": -0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -30071,8 +30071,8 @@
     {
       "Note_Index": 480,
       "Expected_Note": "C\u266f5",
-      "Deviation_Cents": 30.03,
-      "Deviation_Hz": 9.7,
+      "Deviation_Cents": 40.0,
+      "Deviation_Hz": 12.96,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
@@ -30111,8 +30111,8 @@
     {
       "Note_Index": 484,
       "Expected_Note": "D5",
-      "Deviation_Cents": -10.0,
-      "Deviation_Hz": -3.38,
+      "Deviation_Cents": 0.0,
+      "Deviation_Hz": 0.0,
       "Correction_Applied": false,
       "Correction_Type": "None",
       "Excluded": false,
