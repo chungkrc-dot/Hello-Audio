@@ -1,8 +1,17 @@
 dataset (Strings only)/
 
-# Generated run artifacts (validation reports under tests/scripts/validation/
-# are tracked deliberately — the technical manual cites them)
-tests/outputs/
+# Generated run artifacts. Validation reports under tests/scripts/validation/
+# are tracked deliberately — the technical manual cites them — and the
+# certification proof figures below are embedded in the manual.
+tests/outputs/*
+!tests/outputs/certification_reports/
+
+# Scratch / working material
+scratch/
+appendix_a_draft.md
+calc_stats.py
+run_batch.sh
+string_instruments_summary.txt
 
 # Python environment
 venv/

@@ -413,7 +413,7 @@ This yields a 12-dimensional vector at each frame representing the intensity of 
 
 *Chroma CQT Spectral Transformation*
 
-![Chroma CQT Proof](../tests/certification_reports/04_chroma_cqt_proof_graph.png)
+![Chroma CQT Proof](../tests/outputs/certification_reports/04_chroma_cqt_proof_graph.png)
 
 *Note.* The transformation of a linear frequency spectrogram (left) into a 12-bin octave-agnostic Chroma CQT matrix (right), demonstrating how distinct notes C3 and C4 map to the corresponding pitch class bin.
 
@@ -432,7 +432,7 @@ By using Chroma CQT instead of Absolute Frequency (STFT), the algorithm mathemat
 
 *Cost Matrix Comparison: Absolute Frequency vs. Chroma CQT*
 
-![Chroma vs STFT Advantage Proof](../tests/certification_reports/06_chroma_dtw_advantage_proof_graph.png)
+![Chroma vs STFT Advantage Proof](../tests/outputs/certification_reports/06_chroma_dtw_advantage_proof_graph.png)
 
 *Note.* A comparison of Dynamic Time Warping (DTW) cost matrices when a human performance contains an octave error. The absolute frequency (STFT) matrix (left) produces a high-cost mismatch, whereas the Chroma CQT matrix (right) aligns the melodic sequence by omitting the register differential.
 
@@ -488,7 +488,7 @@ By determining the continuous path of minimal cost, the algorithm generates the 
 
 *Temporal Alignment of Raw pYIN Pitch Trace*
 
-![DTW Temporal Alignment Proof](../tests/certification_reports/05_dtw_alignment_proof_graph.png)
+![DTW Temporal Alignment Proof](../tests/outputs/certification_reports/05_dtw_alignment_proof_graph.png)
 
 *Note.* The application of the Chroma-derived DTW warping path to correct temporal skew. The raw human pYIN frequency trace (left, red) is temporally misaligned with the target MIDI grid (green), but is mathematically mapped into rhythmic alignment (right, blue) utilizing the optimal warping path.
 
@@ -498,7 +498,7 @@ By determining the continuous path of minimal cost, the algorithm generates the 
 
 *Unvoiced Frame Masking using DTW Confidence*
 
-![DTW Masking Proof](../tests/certification_reports/03_dtw_masking_proof_graph.png)
+![DTW Masking Proof](../tests/outputs/certification_reports/03_dtw_masking_proof_graph.png)
 
 *Note.* The isolation of intentional musical notes. The raw pYIN trace (left) contains tracking noise during periods of rest. The DTW boolean masking logic (right) preserves only the frames that successfully match the MIDI score, discarding acoustic noise.
 
@@ -576,7 +576,7 @@ $$f_{folded}[n] = 440 \cdot 2^{\frac{p_{folded}[n] - 69}{12}}$$
 
 *Harmonic Folding Correction of Overtone Artifacts*
 
-![Harmonic Folding Proof (pYIN)](../tests/certification_reports/02_octave_folding_proof_graph.png)
+![Harmonic Folding Proof (pYIN)](../tests/outputs/certification_reports/02_octave_folding_proof_graph.png)
 ![Harmonic Folding Proof (REAPER)](images/reaper_octave_folding_example.png)
 
 *Note.* The algorithmic correction of a pitch tracking error. An acoustic overtone incorrectly tracked as the fundamental frequency due to strong harmonic energy is mathematically folded into the correct target register and pitch class, restoring accurate intonation analysis. The top figure demonstrates this correction on pYIN output, while the bottom figure demonstrates identical corrective behavior on REAPER output (specifically isolating a mechanical octave error).
@@ -689,7 +689,7 @@ To analyze performance intensity, Hello-Audio measures the Root Mean Square (RMS
 
 *Perceptual A-Weighting of Broadband Audio*
 
-![Amplitude Proof](../tests/certification_reports/01_amplitude_proof_graph.png)
+![Amplitude Proof](../tests/outputs/certification_reports/01_amplitude_proof_graph.png)
 
 *Note.* The effect of the A-weighting perceptual filter on a flat broadband noise signal. The raw signal (left) contains equal energy across all frequencies, while the filtered signal (right) attenuates low and high frequencies to mimic human hearing sensitivity.
 
