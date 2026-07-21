@@ -1,5 +1,9 @@
 dataset (Strings only)/
 
+# Generated run artifacts (validation reports under tests/scripts/validation/
+# are tracked deliberately — the technical manual cites them)
+tests/outputs/
+
 # Python environment
 venv/
 __pycache__/
