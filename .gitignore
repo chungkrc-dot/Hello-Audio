@@ -1,0 +1,9 @@
+dataset (Strings only)/
+
+# Python environment
+venv/
+__pycache__/
+*.py[cod]
+
+# OS
+.DS_Store
