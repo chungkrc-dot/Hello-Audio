@@ -1393,3 +1393,139 @@ At `max_pitch_slope` $= 0.50$, `switch_prob` $= 0.005$ the pipeline achieves **9
 > **$\theta_{slope} = 0.50$ cannot be chosen by minimising deviation.** Mean $|\text{dev}|$ falls monotonically as the threshold tightens, reaching $10.54$ c at $\theta_{slope} = 0.10$ — but §4B establishes that a $0.10$ threshold clips first-position vibrato, and the $19.08\%$ rejection rate confirms it empirically. The apparent accuracy gain is measurement bias: the filter is discarding the outer excursions of legitimate vibrato, leaving a sample compressed toward each note's pitch centre and systematically understating the performer's true pitch variance. Selecting the threshold by optimising the metric would optimise the metric at the expense of its validity. $\theta_{slope} = 0.50$ is set from the gesture physics and *validated* here by confirming that neither yield nor accuracy collapses at that setting — detection yield is within $0.6$ pp of the grid maximum and mean deviation within $0.35$ c of the grid minimum.
 >
 > **The engine is insensitive to both parameters within the plateau.** 27 of 30 cells fall within 1.0 pp of the best detection yield and 0.5 cents of the best mean deviation, including the production setting. Only $\theta_{slope} = 0.10$ at low $\beta$ falls outside, and it does so for the reason above.
+
+### Comprehensive Parameter Sensitivity
+
+The three subsections above establish sensitivity results for `confidence_threshold` (synthetic tones), `max_pitch_slope` and `switch_prob` (URMP audio). This subsection sweeps the two remaining pipeline parameters — `rms_threshold` and `min_frames` — and then consolidates all five into a single robustness statement. The script `validate_rms_minframes.py` implements the sweep.
+
+#### Testing Methodology
+
+A full factorial grid of 6 `rms_threshold` values $\times$ 5 `min_frames` values (30 combinations) was run through the complete production pipeline on real URMP audio, holding all other parameters at Engine Optimal Defaults (`max_pitch_slope` $= 0.50$, `switch_prob` $= 0.005$, `reference_pitch_hz` $= 440.0$). The track subset is identical to the slope/`switch_prob` ablation — the first five tracks of each instrument in sorted path order, 15 tracks total — so the two studies are directly comparable.
+
+Both parameters are consumed **downstream** of `librosa.pyin()`, inside `analyze_intonation()`. Extraction was therefore performed exactly once per track and reused across all 30 cells (15 extractions rather than 450). This is a stronger caching position than the slope study, where `switch_prob` is consumed inside pyin itself and forced one extraction per (track, `switch_prob`) pair.
+
+At the URMP sample rate of 48 kHz with `hop_length` $= 512$, the frame rate is 93.75 fps, so `min_frames` corresponds to a physical minimum note duration:
+
+| `min_frames` | 1 | 2 | 4 | 8 | 16 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Minimum island duration | 10.7 ms | **21.3 ms** | 42.7 ms | 85.3 ms | 170.7 ms |
+
+> [!IMPORTANT]
+> **`rms_threshold` is not applied as written.** `analyze_intonation()` overrides the nominal value with an adaptive noise floor:
+>
+> $$\tau_{\text{eff}} = \max\left(\tau_{\text{nominal}},\ 2 \cdot P_{10}(\text{RMS})\right)$$
+>
+> The swept parameter is therefore only *binding* on tracks where it exceeds twice that track's 10th-percentile RMS; below that point the adaptive floor governs and the nominal value has no effect at all. Every cell below reports a **binding rate** — the percentage of the 15 tracks on which the nominal threshold is the operative one. This behaviour was not anticipated when the sweep was designed; it was discovered by instrumenting the effective threshold and materially changes how the results read.
+
+#### 1. Detection Yield (% of MIDI notes with non-NaN deviation)
+
+| `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 0.001 | 95.8 | 95.7 | 95.4 | 94.3 | 86.0 |
+| 0.0025 | 95.8 | 95.7 | 95.2 | 94.1 | 85.6 |
+| **0.005** | 93.1 | **92.8** | 92.2 | 89.6 | 78.2 |
+| 0.01 | 79.1 | 78.5 | 76.9 | 71.3 | 53.1 |
+| 0.02 | 52.3 | 52.0 | 49.8 | 40.0 | 20.7 |
+| 0.05 | 8.7 | 8.3 | 7.4 | 5.0 | 2.3 |
+
+#### 2. Inclusion Yield (% of detected notes passing `is_note_excluded()`)
+
+| `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 0.001 | 90.5 | 90.6 | 90.9 | 91.1 | 89.9 |
+| 0.0025 | 90.5 | 90.6 | 90.9 | 91.1 | 89.9 |
+| **0.005** | 90.8 | **91.0** | 91.1 | 91.4 | 89.7 |
+| 0.01 | 91.5 | 91.5 | 91.5 | 91.4 | 90.4 |
+| 0.02 | 92.2 | 92.3 | 92.2 | 91.4 | 89.7 |
+| 0.05 | 87.6 | 89.1 | 88.7 | 91.4 | 85.7 |
+
+#### 3. Mean $|\text{Deviation\_Cents}|$ (included notes)
+
+| `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 0.001 | 10.73 | 10.72 | 10.67 | 10.60 | 10.18 |
+| 0.0025 | 10.70 | 10.69 | 10.64 | 10.56 | 10.21 |
+| **0.005** | 10.93 | **10.89** | 10.85 | 10.83 | 10.50 |
+| 0.01 | 11.21 | 11.14 | 11.11 | 11.05 | 10.20 |
+| 0.02 | 12.64 | 12.64 | 12.52 | 11.54 | 10.79 |
+| 0.05 | 14.91 | 15.10 | 14.06 | 12.95 | 10.37 |
+
+Included-note counts fall from 2,388 (at $\tau = 0.001$, $m = 1$) to 205 (at $\tau = 0.05$, $m = 2$); the production cell holds 2,326.
+
+> [!IMPORTANT]
+> The median $|\text{Deviation\_Cents}|$ again takes exactly **one** distinct value — $10.00$ cents — across all 30 cells, reproducing the finding of the slope/`switch_prob` ablation. This is the 10-cent `resolution = 0.1` semitone quantisation of `librosa.pyin()`, not a property of the parameters under test. **Mean $|\text{dev}|$ is the accuracy axis throughout.** The P90 is likewise near-degenerate, sitting at $20$ cents in 23 of 30 cells and rising to $30$ only where the amplitude gate has destroyed most of the sample.
+
+#### 4. Filter-Action Diagnostics
+
+The direct action of each filter, measured in isolation from the DTW stage downstream. The RMS gate rate is the % of voiced frames removed by the amplitude gate; the binding rate is the % of tracks on which $\tau_{\text{nominal}}$ rather than the adaptive floor is operative. Both depend on $\tau$ only.
+
+| $\tau$ (`rms_threshold`) | RMS gate rate | Binding rate | Detection yield ($m=2$) |
+| :---: | :---: | :---: | :---: |
+| 0.001 | 14.24% | 0% | 95.7% |
+| 0.0025 | 15.17% | 7% | 95.7% |
+| **0.005** | **23.26%** | **60%** | **92.8%** |
+| 0.01 | 44.67% | 93% | 78.5% |
+| 0.02 | 72.16% | 100% | 52.0% |
+| 0.05 | 96.51% | 100% | 8.3% |
+
+The duration filter's action — % of candidate note-islands destroyed for falling short of `min_frames`:
+
+| `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 0.001 | 0.00 | 7.96 | 13.67 | 18.41 | 29.98 |
+| 0.0025 | 0.00 | 7.98 | 13.82 | 18.88 | 30.79 |
+| **0.005** | 0.00 | **7.83** | 13.69 | 19.34 | 34.74 |
+| 0.01 | 0.00 | 6.38 | 12.56 | 23.34 | 48.07 |
+| 0.02 | 0.00 | 4.43 | 11.57 | 33.26 | 69.45 |
+| 0.05 | 0.00 | 5.54 | 18.24 | 47.56 | 78.83 |
+
+> [!NOTE]
+> The two diagnostics separate cleanly. The **amplitude gate is the dominant actor**: raising $\tau$ from $0.005$ to $0.05$ removes 96.5% of all voiced frames, and detection yield collapses with it. The **duration filter is comparatively gentle at the production setting**: $m = 2$ destroys 7.8% of candidate islands but costs only $0.33$ pp of detection yield, because the islands it destroys are one-frame fragments (10.7 ms) that rarely carry a note's median $f_0$ on their own. The destruction rate rises with $\tau$ at high $m$ (78.8% at $\tau = 0.05$, $m = 16$) because an aggressive amplitude gate fragments continuous notes into short islands, which the duration filter then removes — the two filters interact, and that interaction is what makes the far corner of the grid collapse.
+
+#### 5. Marginal Effects
+
+| Parameter | Range swept | Detection yield range | Mean $|\text{dev}|$ range |
+| :--- | :---: | :---: | :---: |
+| `rms_threshold` | 0.001 → 0.05 (50$\times$) | **87.10 pp** | 2.92 c |
+| `rms_threshold` | 0.001 → 0.005 (working range) | 4.26 pp | 0.29 c |
+| `min_frames` | 1 → 16 | 16.48 pp | 1.49 c |
+| `min_frames` | 1 → 8 (working range) | 5.08 pp | 0.61 c |
+
+#### 6. Production Setting vs. Grid
+
+At `rms_threshold` $= 0.005$, `min_frames` $= 2$ the pipeline achieves **92.8% detection yield**, **91.0% inclusion yield**, and **10.89 cents** mean $|\text{dev}|$ over 2,326 included notes, with the nominal threshold binding on 60% of tracks (mean effective threshold $0.00641$).
+
+| Comparison | $\Delta$ Detection yield | $\Delta$ Inclusion yield | $\Delta$ Mean $\|\text{dev}\|$ |
+| :--- | :---: | :---: | :---: |
+| vs. REAPER's $m = 4$ (same $\tau$) | $+0.65$ pp | $-0.17$ pp | $+0.04$ c |
+| vs. no duration filter ($m = 1$) | $-0.33$ pp | $+0.12$ pp | $-0.04$ c |
+| vs. $\tau = 0.0025$ (same $m$) | $-2.90$ pp | $+0.41$ pp | $+0.20$ c |
+| vs. $\tau = 0.05$ (same $m$) | $+84.46$ pp | $+1.84$ pp | $-4.21$ c |
+
+> [!IMPORTANT]
+> **The production `rms_threshold` is not Pareto-optimal on this corpus, and that is reported here as measured.** The optimal region — cells within 1.0 pp of the best detection yield and 0.5 c of the best mean deviation — contains only two cells, $(\tau = 0.001, m = 4)$ and $(\tau = 0.0025, m = 4)$. The production cell is outside it. Setting $\tau = 0.0025$ at the same $m = 2$ would raise detection yield by $2.90$ pp **and** lower mean $|\text{dev}|$ by $0.20$ c, dominating the production setting on both axes, at a cost of $0.41$ pp of inclusion yield.
+>
+> The mechanism is the adaptive floor, not the nominal value. At $\tau \le 0.0025$ the nominal threshold binds on 0–7% of tracks, so those cells are measuring the adaptive floor $2 \cdot P_{10}(\text{RMS})$ operating alone. The finding is therefore best stated as: **on URMP, the adaptive floor is a better amplitude gate than a fixed $0.005$**, and the fixed value only does harm on the 60% of tracks where it overrides the floor. This does not license changing the default without further work — the sweep covers 15 tracks of one dataset, and a lower gate admits more low-amplitude frames whose exclusion may be desirable on noisier recordings — but it is a live finding and is recorded as such rather than reconciled to the current default.
+
+#### 7. Consolidated Five-Parameter Robustness
+
+All five pipeline parameters, with the span each induces across its swept range:
+
+| Parameter | Range swept | Detection yield span | Mean $|\text{dev}|$ span | Verdict |
+| :--- | :---: | :---: | :---: | :--- |
+| `switch_prob` | 0.001 → 0.05 (50$\times$) | 0.79 pp | 0.06 c | **Robust** — effectively inert |
+| `max_pitch_slope` | 0.10 → disabled | 0.56 pp | 0.39 c | **Robust** on aggregates |
+| `confidence_threshold` | 0.0 → 0.9 | — (synthetic) | 0.08 c MAE | **Robust** through 0.8 |
+| `min_frames` | 1 → 16 | 16.48 pp | 1.49 c | **Robust** 1–8; degrades at 16 |
+| `rms_threshold` | 0.001 → 0.05 (50$\times$) | 87.10 pp | 2.92 c | **Sensitive** — dominant parameter |
+
+The `confidence_threshold` sweep was run on synthetic tones rather than URMP audio and reports tone-level pass rate rather than note detection yield, so its yield column is not directly comparable; the measured result there was a 100% pass rate maintained through threshold 0.8 with deviation MAE invariant at 1.11 cents, tracking bias within $\pm 0.52$ cents and precision 2.54–2.90 cents throughout.
+
+#### Overall Verdict
+
+> [!NOTE]
+> **Four of the five parameters are not load-bearing; one is.** `switch_prob`, `max_pitch_slope` and `confidence_threshold` each move the aggregate metrics by less than 1 percentage point of yield and less than half a cent of mean deviation across sweeps spanning 50-fold ranges or filter-disabled endpoints. `min_frames` is flat from 1 to 8 (5.08 pp, 0.61 c) and only breaks at $m = 16$, where the 170.7 ms floor exceeds the duration of ordinary passagework. **No conclusion reported anywhere in this manual can be attributed to the choice of these four parameters.** That is the substantive robustness claim, and it now rests on measured factorial sweeps rather than assertion.
+>
+> **`rms_threshold` genuinely matters, and it is the only parameter that does.** Over its swept range detection yield spans 87 percentage points — two orders of magnitude more than any other parameter — because it directly gates 14% to 97% of all voiced frames. Any result in this manual is conditional on the amplitude gate, and a reader wishing to reproduce these figures must match it. Within the working range $0.001 \le \tau \le 0.005$ the span narrows to 4.26 pp, so the engine is *locally* stable around its default even though it is *globally* sensitive; the collapse is confined to $\tau \ge 0.01$, settings no plausible tuning process would select.
+>
+> **Two caveats are carried forward rather than resolved.** First, the adaptive noise floor means the nominal `rms_threshold` is inert on 40% of URMP tracks at the default, and the sweep shows the floor alone outperforming the fixed value — a Pareto improvement of $+2.90$ pp yield and $-0.20$ c mean deviation is available at $\tau = 0.0025$ and has not been adopted pending validation on a second corpus. Second, the apparent accuracy *gain* at aggressive settings ($10.37$ c mean at $\tau = 0.05$, $m = 16$, versus $10.89$ c at production) is the same selection artefact identified for $\theta_{slope} = 0.10$ above: those cells retain only 54 of 2,326 included notes, and what survives an aggressive gate is the loud, stable, well-tuned core of each note. Optimising mean deviation over this grid would select a configuration that measures almost nothing very accurately.
