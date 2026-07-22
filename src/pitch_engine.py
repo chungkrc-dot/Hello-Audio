@@ -1,6 +1,8 @@
 import librosa
 import numpy as np
 
+from src.stats_summary import prefixed_stats
+
 def get_instrument_fmin_fmax(instrument: str):
     """
     Returns the appropriate (fmin, fmax) frequency limits in Hz 
@@ -268,11 +270,23 @@ def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_fram
     if results['success']:
         deviation_cents = np.array(metrics['deviation_cents_list'])
         deviation_hz = np.array(metrics['deviation_hz_list'])
-        results['mean_dev'] = np.mean(deviation_cents)
-        results['std_dev'] = np.std(deviation_cents)
-        results['mean_dev_hz'] = np.mean(deviation_hz)
-        results['std_dev_hz'] = np.std(deviation_hz)
+
+        # Full distributional summary (median/IQR/skewness/kurtosis alongside the
+        # classical mean/SD) for both units. Frame-level deviations from pYIN sit
+        # on a 10-cent lattice — see src/stats_summary for what that costs the
+        # order statistics.
+        results.update(prefixed_stats(deviation_cents, 'dev_cents'))
+        results.update(prefixed_stats(deviation_hz, 'dev_hz'))
+
+        # Legacy aliases retained for existing callers and the results table.
+        # These now use the sample SD (ddof=1) rather than the population SD;
+        # at the frame counts involved the difference is far below display precision.
+        results['mean_dev'] = results['dev_cents_mean']
+        results['std_dev'] = results['dev_cents_std']
+        results['mean_dev_hz'] = results['dev_hz_mean']
+        results['std_dev_hz'] = results['dev_hz_std']
+
         results['frame_count'] = len(deviation_cents)
         results['note_count'] = len(metrics['starts'])
-        
+
     return results

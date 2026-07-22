@@ -10,7 +10,82 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from itertools import zip_longest
-from src.midi_alignment import is_note_excluded
+from src.midi_alignment import is_note_excluded, summarize_dtw_metrics
+from src.stats_summary import PYIN_RESOLUTION_CENTS, TRIM_PROPORTION
+
+# Rows of the distributional summary tables, in reporting order.
+# (stat key, display label, format string)
+DEVIATION_STAT_ROWS = [
+    ("n",        "Sample size (n)",             "{:.0f}"),
+    ("mean",     "Mean",                        "{:.2f}"),
+    ("std",      "Standard deviation",          "{:.2f}"),
+    ("sem",      "Standard error of the mean",  "{:.2f}"),
+    ("median",   "Median",                      "{:.2f}"),
+    ("q1",       "1st quartile (Q1)",           "{:.2f}"),
+    ("q3",       "3rd quartile (Q3)",           "{:.2f}"),
+    ("iqr",      "Interquartile range (IQR)",   "{:.2f}"),
+    ("mad",      "Median absolute deviation",   "{:.2f}"),
+    ("trimmed_mean", f"{TRIM_PROPORTION:.0%}-trimmed mean", "{:.2f}"),
+    ("skewness", "Skewness (G1)",               "{:.3f}"),
+    ("kurtosis", "Excess kurtosis (G2)",        "{:.3f}"),
+    ("min",      "Minimum",                     "{:.2f}"),
+    ("max",      "Maximum",                     "{:.2f}"),
+]
+
+DISTRIBUTION_CAPTION = (
+    "**Skewness (G1)** is 0 for a symmetric distribution; positive values mean the sharp "
+    "(above-target) tail is the longer one. **Excess kurtosis (G2)** is 0 for a Gaussian; "
+    "positive values mean heavier tails than normal, so the mean and standard deviation "
+    "understate how often large errors occur and the median/IQR pair is the more honest "
+    "summary. Both are bias-corrected sample estimators."
+)
+
+
+def render_deviation_statistics_table(stats_by_condition, unit_label, caption_key,
+                                      note_resolution=False):
+    """
+    Renders a statistic-per-row table comparing the full deviation distribution
+    across conditions. `stats_by_condition` maps a condition name to a dict of
+    the un-prefixed statistic keys produced by src.stats_summary.descriptive_stats.
+    """
+    if not stats_by_condition:
+        return
+
+    table = {}
+    for condition, stats in stats_by_condition.items():
+        column = []
+        for key, _label, fmt in DEVIATION_STAT_ROWS:
+            value = stats.get(key, np.nan)
+            column.append("N/A" if value is None or pd.isna(value) else fmt.format(value))
+        table[condition] = column
+
+    df = pd.DataFrame(table, index=[label for _k, label, _f in DEVIATION_STAT_ROWS])
+    df.index.name = f"Statistic ({unit_label})"
+
+    st.dataframe(df, width="stretch")
+
+    csv = df.to_csv().encode('utf-8')
+    st.download_button(
+        label=f"Download Distribution Statistics ({unit_label}) as CSV",
+        data=csv,
+        file_name=f'deviation_distribution_stats_{caption_key}.csv',
+        mime='text/csv',
+        key=f'dl_dist_{caption_key}'
+    )
+
+    if note_resolution:
+        st.caption(
+            f"**Resolution floor:** pYIN decodes pitch on a fixed grid of "
+            f"{PYIN_RESOLUTION_CENTS:.0f} cents, so frame deviations are exact multiples of "
+            f"{PYIN_RESOLUTION_CENTS:.0f} cents and per-note medians land on a 5-cent lattice. "
+            "The median, quartiles and IQR are order statistics: they can only ever return a "
+            "lattice value, and on large note populations they stop moving altogether. Treat "
+            "them as naming a grid cell, not as measurements to two decimal places. The mean "
+            f"and the {TRIM_PROPORTION:.0%}-trimmed mean are averages of many lattice values, "
+            "so they dither off the grid and keep full resolution — the trimmed mean is the "
+            "one to quote when the distribution is heavy-tailed. REAPER returns continuous f0 "
+            "and has no such floor."
+        )
 
 def render_sidebar_parameters(is_midi_uploaded=False):
     """
@@ -149,6 +224,16 @@ def get_val(res_dict, key):
     """Helper to safely extract a value from the results dictionary."""
     return res_dict[key] if res_dict and key in res_dict else np.nan
 
+def _unprefix(res_dict, prefix):
+    """
+    Recovers a plain statistics dict from the flattened, prefixed keys stored in a
+    results dict (e.g. 'dev_cents_median' -> 'median').
+    """
+    if not res_dict:
+        return {}
+    head = f"{prefix}_"
+    return {k[len(head):]: v for k, v in res_dict.items() if k.startswith(head)}
+
 def render_results_table(res_unp, res_plg, unp_ok, plg_ok):
     """
     Renders the Legacy Island Intonation Results table.
@@ -204,6 +289,30 @@ def render_results_table(res_unp, res_plg, unp_ok, plg_ok):
     if plg_ok:
         msg += f" {res_plg['frame_count']} frames (Plugged)"
     st.success(msg + ".")
+
+    # --- Distributional summary ---
+    # The table above reports means only. Frame-level cent deviations are strongly
+    # non-normal (vibrato produces broad shoulders, residual tracking errors produce
+    # heavy tails), so the robust and shape statistics are reported separately.
+    st.write("**Deviation Distribution Statistics (Legacy)**")
+
+    cents_stats = {}
+    hz_stats = {}
+    if unp_ok:
+        cents_stats["Unplugged"] = _unprefix(res_unp, 'dev_cents')
+        hz_stats["Unplugged"] = _unprefix(res_unp, 'dev_hz')
+    if plg_ok:
+        cents_stats["Plugged"] = _unprefix(res_plg, 'dev_cents')
+        hz_stats["Plugged"] = _unprefix(res_plg, 'dev_hz')
+
+    tab_cents, tab_hz = st.tabs(["Cents", "Hertz"])
+    with tab_cents:
+        render_deviation_statistics_table(cents_stats, "cents", "legacy_cents",
+                                          note_resolution=True)
+    with tab_hz:
+        render_deviation_statistics_table(hz_stats, "Hz", "legacy_hz")
+
+    st.caption(DISTRIBUTION_CAPTION)
 
 def render_sequence_comparison(midi_seq, unp_seq, plg_seq):
     """
@@ -364,66 +473,38 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     st.write("**Overall DTW Performance Summary**")
     
     summary_data = []
-    
-    def calculate_means(metrics):
-        if not metrics:
-            return {
-                "Notes Detected (%)": np.nan,
-                "Notes Included (%)": np.nan,
-                "mean RMS amplitude (dB FS)": np.nan, 
-                "mean RMS amplitude (dB A)": np.nan, 
-                "mean intonation deviation (Hz)": np.nan, 
-                "mean intonation deviation (cents)": np.nan
-            }
-            
-        total_expected = len(metrics)
-        detected_count = sum(1 for m in metrics if not pd.isna(m["Deviation_Cents"]))
-        
-        filtered_metrics = [m for m in metrics if m["Note_Index"] not in excluded_indices]
-        
-        included_count = sum(1 for m in filtered_metrics if not pd.isna(m["Deviation_Cents"]))
-        
-        pct_detected = (detected_count / total_expected * 100) if total_expected > 0 else np.nan
-        pct_included = (included_count / detected_count * 100) if detected_count > 0 else np.nan
-        
-        if not filtered_metrics:
-            return {
-                "Notes Detected (%)": pct_detected,
-                "Notes Included (%)": pct_included,
-                "mean RMS amplitude (dB FS)": np.nan, 
-                "mean RMS amplitude (dB A)": np.nan, 
-                "mean intonation deviation (Hz)": np.nan, 
-                "mean intonation deviation (cents)": np.nan
-            }
-            
-        df = pd.DataFrame(filtered_metrics)
+
+    # Aggregation lives in src/midi_alignment.summarize_dtw_metrics() so the UI,
+    # the headless CLI and the validation scripts all report the same numbers.
+    unp_summary = summarize_dtw_metrics(dtw_metrics_unp, excluded_indices)
+    plg_summary = summarize_dtw_metrics(dtw_metrics_plg, excluded_indices)
+
+    def as_row(summary):
         return {
-            "Notes Detected (%)": pct_detected,
-            "Notes Included (%)": pct_included,
-            "mean RMS amplitude (dB FS)": df["Median_RMS_dBFS"].mean(),
-            "mean RMS amplitude (dB A)": df["Median_RMS_dBA"].mean(),
-            "mean intonation deviation (Hz)": df["Deviation_Hz"].mean(),
-            "mean intonation deviation (cents)": df["Deviation_Cents"].mean(),
+            "Notes Detected (%)": summary["pct_detected"],
+            "Notes Included (%)": summary["pct_included"],
+            "mean RMS amplitude (dB FS)": summary["mean_rms_dbfs"],
+            "mean RMS amplitude (dB A)": summary["mean_rms_dba"],
+            "mean intonation deviation (Hz)": summary["dev_hz_mean"],
+            "mean intonation deviation (cents)": summary["dev_cents_mean"],
+            "median intonation deviation (cents)": summary["dev_cents_median"],
+            "IQR of deviation (cents)": summary["dev_cents_iqr"],
         }
-        
-    unp_means = calculate_means(dtw_metrics_unp)
-    plg_means = calculate_means(dtw_metrics_plg)
-    
+
+    unp_means = as_row(unp_summary)
+    plg_means = as_row(plg_summary)
+
     unp_means["Condition"] = "Unplugged"
     plg_means["Condition"] = "Plugged"
-    
+
     summary_data.append(unp_means)
     summary_data.append(plg_means)
     
-    delta = {
-        "Condition": "Delta (Unplugged - Plugged)",
-        "Notes Detected (%)": unp_means["Notes Detected (%)"] - plg_means["Notes Detected (%)"],
-        "Notes Included (%)": unp_means["Notes Included (%)"] - plg_means["Notes Included (%)"],
-        "mean RMS amplitude (dB FS)": unp_means["mean RMS amplitude (dB FS)"] - plg_means["mean RMS amplitude (dB FS)"],
-        "mean RMS amplitude (dB A)": unp_means["mean RMS amplitude (dB A)"] - plg_means["mean RMS amplitude (dB A)"],
-        "mean intonation deviation (Hz)": unp_means["mean intonation deviation (Hz)"] - plg_means["mean intonation deviation (Hz)"],
-        "mean intonation deviation (cents)": unp_means["mean intonation deviation (cents)"] - plg_means["mean intonation deviation (cents)"]
-    }
+    delta = {"Condition": "Delta (Unplugged - Plugged)"}
+    for key in unp_means:
+        if key == "Condition":
+            continue
+        delta[key] = unp_means[key] - plg_means[key]
     summary_data.append(delta)
     
     df_summary = pd.DataFrame(summary_data)
@@ -442,5 +523,28 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     
     st.caption("**Notes Detected (%)**: The percentage of expected MIDI notes that were successfully extracted by the pitch tracking algorithm.\n\n"
                "**Notes Included (%)**: The percentage of *detected notes* that successfully passed all algorithmic tracking filters (and manual exclusions) to contribute to the mean deviation calculations above.")
+
+    # --- Distributional summary ---
+    st.write("**Deviation Distribution Statistics (DTW)**")
+
+    cents_stats = {}
+    hz_stats = {}
+    if dtw_metrics_unp:
+        cents_stats["Unplugged"] = _unprefix(unp_summary, 'dev_cents')
+        hz_stats["Unplugged"] = _unprefix(unp_summary, 'dev_hz')
+    if dtw_metrics_plg:
+        cents_stats["Plugged"] = _unprefix(plg_summary, 'dev_cents')
+        hz_stats["Plugged"] = _unprefix(plg_summary, 'dev_hz')
+
+    tab_cents, tab_hz = st.tabs(["Cents", "Hertz"])
+    with tab_cents:
+        render_deviation_statistics_table(cents_stats, "cents", "dtw_cents",
+                                          note_resolution=True)
+    with tab_hz:
+        render_deviation_statistics_table(hz_stats, "Hz", "dtw_hz")
+
+    st.caption(DISTRIBUTION_CAPTION)
+
+    return unp_summary, plg_summary
 
 

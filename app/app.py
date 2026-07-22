@@ -260,6 +260,32 @@ def main():
                         
                     excluded_indices = render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg)
                     render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices)
+
+                    # Distribution + Bland-Altman diagnostics for the shape statistics
+                    # reported in the summary table above.
+                    from src.midi_alignment import included_note_deviations, pair_note_deviations
+                    from src.visualization import render_distribution_diagnostics
+
+                    series = {}
+                    if dtw_metrics_unp:
+                        series["Unplugged"] = included_note_deviations(dtw_metrics_unp, excluded_indices)
+                    if dtw_metrics_plg:
+                        series["Plugged"] = included_note_deviations(dtw_metrics_plg, excluded_indices)
+
+                    paired = None
+                    if dtw_metrics_unp and dtw_metrics_plg:
+                        dev_unp, dev_plg, note_labels = pair_note_deviations(
+                            dtw_metrics_unp, dtw_metrics_plg, excluded_indices
+                        )
+                        if dev_unp.size >= 2:
+                            paired = (dev_unp, dev_plg, "Unplugged", "Plugged", note_labels)
+
+                    # DTW deviations are per-note medians of frame values, so they
+                    # sit on a 5-cent lattice rather than the raw 10-cent frame grid.
+                    from src.stats_summary import PYIN_NOTE_MEDIAN_RESOLUTION_CENTS
+                    render_distribution_diagnostics(series, paired=paired, unit="cents",
+                                                    key_prefix="dtw",
+                                                    bin_width=PYIN_NOTE_MEDIAN_RESOLUTION_CENTS)
                 else:
                     st.info("Upload a MIDI reference to view DTW Alignment Diagnostics.")
 
@@ -272,7 +298,23 @@ def main():
                 
                 # Legacy Tables
                 render_results_table(res_unp, res_plg, unp_ok, plg_ok)
-                
+
+                # Distribution diagnostics. No Bland-Altman here: legacy mode
+                # produces an unordered list of frame deviations per condition with
+                # no note-level correspondence between them, so the two conditions
+                # cannot be paired and a Bland-Altman plot would be meaningless.
+                from src.visualization import render_distribution_diagnostics
+                import numpy as _np
+
+                legacy_series = {}
+                if unp_ok:
+                    legacy_series["Unplugged"] = _np.asarray(res_unp['deviation_cents_list'], dtype=float)
+                if plg_ok:
+                    legacy_series["Plugged"] = _np.asarray(res_plg['deviation_cents_list'], dtype=float)
+                from src.stats_summary import PYIN_RESOLUTION_CENTS
+                render_distribution_diagnostics(legacy_series, unit="cents", key_prefix="legacy",
+                                                bin_width=PYIN_RESOLUTION_CENTS)
+
                 # Pitch Tracks
                 render_pitch_track_visualizations(unp_ok, plg_ok, res_unp, res_plg)
 

@@ -7,6 +7,115 @@ pitch boundaries, and extracting precise intonation metrics bound strictly to th
 """
 import numpy as np
 
+from src.stats_summary import prefixed_stats
+
+def included_note_deviations(metrics, excluded_indices=None, key="Deviation_Cents"):
+    """
+    Pulls the per-note deviation values that contribute to the summary: notes that
+    were detected at all, minus any the caller excluded (the UI's Include column,
+    which is seeded by is_note_excluded()).
+
+    Returned as a plain float array so it can be fed straight to the statistics
+    and plotting helpers.
+    """
+    if not metrics:
+        return np.array([])
+
+    excluded = set(excluded_indices or [])
+    vals = [m.get(key, np.nan) for m in metrics if m.get("Note_Index") not in excluded]
+    arr = np.asarray(vals, dtype=float)
+    return arr[~np.isnan(arr)]
+
+
+def pair_note_deviations(metrics_a, metrics_b, excluded_indices=None, key="Deviation_Cents"):
+    """
+    Pairs two DTW metric lists note-for-note by Note_Index, keeping only notes both
+    sides detected and neither side excluded. Returns (values_a, values_b, labels).
+
+    This is the input a Bland-Altman analysis requires: two measurements of the
+    *same* note, so the difference between them is attributable to the conditions
+    (or engines) being compared rather than to which notes each happened to catch.
+    """
+    if not metrics_a or not metrics_b:
+        return np.array([]), np.array([]), []
+
+    excluded = set(excluded_indices or [])
+    by_idx_a = {m["Note_Index"]: m for m in metrics_a}
+    by_idx_b = {m["Note_Index"]: m for m in metrics_b}
+
+    values_a, values_b, labels = [], [], []
+    for idx in sorted(set(by_idx_a) & set(by_idx_b)):
+        if idx in excluded:
+            continue
+        va = by_idx_a[idx].get(key, np.nan)
+        vb = by_idx_b[idx].get(key, np.nan)
+        if np.isnan(va) or np.isnan(vb):
+            continue
+        values_a.append(va)
+        values_b.append(vb)
+        labels.append(f"Note {idx} ({by_idx_a[idx].get('Expected_Note', '?')})")
+
+    return np.asarray(values_a, dtype=float), np.asarray(values_b, dtype=float), labels
+
+
+def summarize_dtw_metrics(metrics, excluded_indices=None):
+    """
+    Aggregates the note-by-note DTW metrics into one overall performance summary.
+
+    Reports detection and inclusion yields, mean loudness, and a full
+    distributional summary of the deviation in both cents and Hz — median, IQR,
+    skewness and kurtosis as well as mean and SD, because cent-deviation
+    distributions across a real performance are typically heavy-tailed and
+    asymmetric, and a mean alone misrepresents them.
+
+    Keys are flat: 'dev_cents_median', 'dev_hz_iqr', and so on (see
+    src/stats_summary.STAT_KEYS).
+    """
+    summary = {
+        "total_expected": 0,
+        "detected_count": 0,
+        "included_count": 0,
+        "pct_detected": np.nan,
+        "pct_included": np.nan,
+        "mean_rms_dbfs": np.nan,
+        "mean_rms_dba": np.nan,
+    }
+    summary.update(prefixed_stats([], 'dev_cents'))
+    summary.update(prefixed_stats([], 'dev_hz'))
+
+    if not metrics:
+        return summary
+
+    excluded = set(excluded_indices or [])
+
+    total_expected = len(metrics)
+    detected_count = sum(1 for m in metrics if not np.isnan(m.get("Deviation_Cents", np.nan)))
+
+    filtered = [m for m in metrics if m.get("Note_Index") not in excluded]
+    included_count = sum(1 for m in filtered if not np.isnan(m.get("Deviation_Cents", np.nan)))
+
+    summary["total_expected"] = total_expected
+    summary["detected_count"] = detected_count
+    summary["included_count"] = included_count
+    summary["pct_detected"] = (detected_count / total_expected * 100) if total_expected > 0 else np.nan
+    summary["pct_included"] = (included_count / detected_count * 100) if detected_count > 0 else np.nan
+
+    if not filtered:
+        return summary
+
+    dbfs = np.asarray([m.get("Median_RMS_dBFS", np.nan) for m in filtered], dtype=float)
+    dba = np.asarray([m.get("Median_RMS_dBA", np.nan) for m in filtered], dtype=float)
+    summary["mean_rms_dbfs"] = float(np.nanmean(dbfs)) if np.any(~np.isnan(dbfs)) else np.nan
+    summary["mean_rms_dba"] = float(np.nanmean(dba)) if np.any(~np.isnan(dba)) else np.nan
+
+    summary.update(prefixed_stats(
+        included_note_deviations(metrics, excluded, "Deviation_Cents"), 'dev_cents'))
+    summary.update(prefixed_stats(
+        included_note_deviations(metrics, excluded, "Deviation_Hz"), 'dev_hz'))
+
+    return summary
+
+
 def is_note_excluded(note_dict):
     """
     Centralized logic for determining if a note should be excluded from summary metrics.

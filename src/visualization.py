@@ -189,5 +189,209 @@ def plot_alignment_diagnostics(time_array, f0_midi, expected_audio_pitch, valid_
         margin=dict(l=20, r=20, t=40, b=80),
         hovermode="closest"
     )
-    
+
     return fig
+
+
+# ==========================================
+# Distributional Diagnostics
+# ==========================================
+# The summary tables report median, IQR, skewness and kurtosis, but a shape
+# statistic is only persuasive next to the shape itself. These two plots are the
+# standard evidence a reader expects: the marginal distribution of the deviations,
+# and — when two conditions are measured on the same notes — a Bland-Altman plot
+# of their agreement rather than a correlation coefficient.
+
+def _gaussian_kde_curve(values, n_points=256, pad_factor=0.15):
+    """
+    Scott's-rule Gaussian KDE evaluated on a padded grid.
+
+    Written out rather than taken from scipy so the visualisation layer keeps the
+    same dependency surface as the rest of the module, and so the bandwidth is
+    visible: on quantized data the bandwidth is what decides whether the curve
+    shows the true shape or the output lattice.
+    """
+    arr = np.asarray(values, dtype=float).ravel()
+    arr = arr[~np.isnan(arr)]
+    n = arr.size
+    if n < 2:
+        return np.array([]), np.array([]), np.nan
+
+    std = np.std(arr, ddof=1)
+    if std <= 0:
+        return np.array([]), np.array([]), np.nan
+
+    bandwidth = std * n ** (-1.0 / 5.0)  # Scott's rule for a 1-D sample
+
+    span = arr.max() - arr.min()
+    pad = pad_factor * span if span > 0 else 1.0
+    grid = np.linspace(arr.min() - pad, arr.max() + pad, n_points)
+
+    z = (grid[:, None] - arr[None, :]) / bandwidth
+    density = np.exp(-0.5 * z ** 2).sum(axis=1) / (n * bandwidth * np.sqrt(2 * np.pi))
+
+    return grid, density, bandwidth
+
+
+def plot_deviation_distribution(series, title="Intonation Deviation Distribution",
+                                unit="cents", bin_width=None, show_kde=True):
+    """
+    Histogram (probability density) with an optional KDE overlay and median /
+    quartile reference lines, for one or more labelled deviation samples.
+
+    `series` is a dict of {label: array_of_deviations}. `bin_width` defaults to
+    the pYIN lattice step so that each bar corresponds to exactly one attainable
+    output value — binning quantized data more finely than its own grid produces
+    a comb of empty bins that looks like structure but is pure artefact.
+    """
+    from src.stats_summary import PYIN_RESOLUTION_CENTS
+
+    if bin_width is None:
+        bin_width = PYIN_RESOLUTION_CENTS if unit == "cents" else None
+
+    palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+    fig = go.Figure()
+
+    for i, (label, values) in enumerate(series.items()):
+        arr = np.asarray(values, dtype=float).ravel()
+        arr = arr[~np.isnan(arr)]
+        if arr.size == 0:
+            continue
+
+        color = palette[i % len(palette)]
+
+        fig.add_trace(go.Histogram(
+            x=arr,
+            name=f"{label} (n={arr.size})",
+            histnorm='probability density',
+            opacity=0.55,
+            marker=dict(color=color),
+            xbins=dict(size=bin_width) if bin_width else None
+        ))
+
+        if show_kde:
+            grid, density, _ = _gaussian_kde_curve(arr)
+            if grid.size:
+                fig.add_trace(go.Scatter(
+                    x=grid, y=density, mode='lines', name=f"{label} KDE",
+                    line=dict(color=color, width=2), hoverinfo='skip'
+                ))
+
+        median = float(np.median(arr))
+        fig.add_vline(x=median, line=dict(color=color, width=2, dash='dash'),
+                      annotation_text=f"{label} median {median:.1f}",
+                      annotation_position="top")
+
+    fig.update_layout(
+        title=title,
+        xaxis_title=f"Deviation ({unit})",
+        yaxis_title="Probability density",
+        barmode='overlay',
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+        margin=dict(l=20, r=20, t=40, b=80),
+        hovermode="x"
+    )
+    return fig
+
+
+def plot_bland_altman(a, b, label_a="A", label_b="B", unit="cents",
+                      title="Bland-Altman Agreement", point_labels=None):
+    """
+    Bland-Altman (1986) plot of two paired measurements of the same notes:
+    the difference (a - b) against the mean of the pair, with the bias and the
+    95% limits of agreement drawn in.
+
+    This is the correct diagram for a method-comparison question. A scatter of a
+    against b with a correlation coefficient answers "do these two rank notes the
+    same way?", which is not the question — the question is "by how much can they
+    disagree on any one note?", which is exactly the width of the limits.
+    """
+    from src.stats_summary import bland_altman_stats
+
+    ba = bland_altman_stats(a, b)
+    fig = go.Figure()
+
+    if ba["n"] < 2:
+        fig.update_layout(title=f"{title} — insufficient paired data")
+        return fig, ba
+
+    hover = None
+    if point_labels is not None:
+        valid_a = np.asarray(a, dtype=float)
+        valid_b = np.asarray(b, dtype=float)
+        keep = ~np.isnan(valid_a) & ~np.isnan(valid_b)
+        hover = [str(l) for l, k in zip(point_labels, keep) if k]
+
+    fig.add_trace(go.Scatter(
+        x=ba["means"], y=ba["diffs"], mode='markers',
+        name=f"Notes (n={ba['n']})",
+        marker=dict(color='#1f77b4', size=6, opacity=0.6),
+        text=hover,
+        hovertemplate=("Mean: %{x:.1f}<br>Difference: %{y:.1f}" +
+                       ("<br>%{text}" if hover else "") + "<extra></extra>")
+    ))
+
+    fig.add_hline(y=ba["bias"], line=dict(color='#d62728', width=2),
+                  annotation_text=f"Bias {ba['bias']:+.2f}", annotation_position="right")
+    fig.add_hline(y=ba["loa_upper"], line=dict(color='grey', width=2, dash='dash'),
+                  annotation_text=f"+1.96 SD {ba['loa_upper']:+.2f}", annotation_position="right")
+    fig.add_hline(y=ba["loa_lower"], line=dict(color='grey', width=2, dash='dash'),
+                  annotation_text=f"−1.96 SD {ba['loa_lower']:+.2f}", annotation_position="right")
+
+    fig.update_layout(
+        title=f"{title} ({label_a} − {label_b})",
+        xaxis_title=f"Mean of {label_a} and {label_b} ({unit})",
+        yaxis_title=f"Difference {label_a} − {label_b} ({unit})",
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+        margin=dict(l=20, r=20, t=40, b=80),
+        hovermode="closest"
+    )
+    return fig, ba
+
+
+def render_distribution_diagnostics(series, paired=None, unit="cents",
+                                    key_prefix="dist", bin_width=None):
+    """
+    Streamlit block wrapping the two diagnostic plots. `series` is
+    {label: deviations} for the distribution plot; `paired` is an optional
+    (values_a, values_b, label_a, label_b, point_labels) tuple for Bland-Altman.
+
+    `bin_width` should match the lattice of the data being plotted: 10 cents for
+    raw frame deviations (legacy mode), 5 cents for DTW per-note medians.
+    """
+    st.subheader("Deviation Distribution Diagnostics")
+    st.caption("Cent-deviation distributions are typically non-normal, so the summary tables "
+               "report median and IQR alongside the mean. These plots show the shape those "
+               "statistics describe.")
+
+    show_kde = st.checkbox("Overlay kernel density estimate", value=True,
+                           key=f"{key_prefix}_kde")
+
+    if any(np.asarray(v, dtype=float).size for v in series.values()):
+        fig = plot_deviation_distribution(series, unit=unit, show_kde=show_kde,
+                                          bin_width=bin_width)
+        st.plotly_chart(fig, use_container_width=True)
+        if unit == "cents":
+            width = bin_width if bin_width else 10.0
+            st.caption(f"Bin width is fixed at {width:g} cents, the spacing of the pYIN output "
+                       "lattice for this data. Each bar is one attainable output value; finer "
+                       "bins would show empty gaps that are an artefact of the grid, not of the "
+                       "performance.")
+    else:
+        st.info("No deviation data available to plot.")
+
+    if paired is not None:
+        values_a, values_b, label_a, label_b, point_labels = paired
+        arr_a = np.asarray(values_a, dtype=float)
+        arr_b = np.asarray(values_b, dtype=float)
+        if arr_a.size and arr_b.size and arr_a.size == arr_b.size:
+            fig_ba, ba = plot_bland_altman(arr_a, arr_b, label_a, label_b, unit=unit,
+                                           point_labels=point_labels)
+            st.plotly_chart(fig_ba, use_container_width=True)
+            if ba["n"] >= 2:
+                st.caption(
+                    f"Bias {ba['bias']:+.2f} {unit} with 95% limits of agreement "
+                    f"[{ba['loa_lower']:+.2f}, {ba['loa_upper']:+.2f}] {unit} over {ba['n']} "
+                    f"paired notes. The limits, not the bias, describe how far the two "
+                    f"conditions can disagree on any single note."
+                )

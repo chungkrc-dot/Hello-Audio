@@ -710,6 +710,20 @@ The A-weighting filter functions as a frequency-dependent transformation, attenu
 | **Max Pitch Slope** | $0.10\text{ semitones}$ | Derivative threshold | Discards frames where the frame-to-frame pitch jump exceeds this limit. |
 | **Reference Pitch** | $440.0\text{ Hz}$ | Concert A tuning standard | Shifts the MIDI reference grid to accommodate non-A440 tuning standards (e.g., A=441–443 Hz for European orchestras). When set to A=442 Hz, a frame measured at 442.0 Hz is correctly reported as 0.0 cents deviation from A4, rather than the +7.9 cents that A440-referenced MIDI would indicate. |
 
+### Reported Deviation Statistics
+
+Both the Legacy and DTW result panels report the deviation distribution in cents and in Hertz, rather than a mean alone. The statistics are computed by `src/stats_summary.py` and are identical in both modes.
+
+| Statistic | Definition | Robust? | Affected by the pYIN lattice? |
+| :--- | :--- | :---: | :---: |
+| Mean, SD, SEM | Classical moments; SD is the sample estimator ($\text{ddof} = 1$) | No | No |
+| Median, Q1, Q3, IQR, MAD | Order statistics | Yes | **Yes — severely** |
+| **10%-trimmed mean** | Mean of the sample after discarding 10% from each tail | **Yes** | **No** |
+| Skewness (G1) | Bias-corrected third standardised moment; $0$ if symmetric | No | No |
+| Excess kurtosis (G2) | Bias-corrected fourth standardised moment; $0$ for a Gaussian | No | No |
+
+The final column is the operative one and is derived in "Distributional Statistics & the Quantization Resolution Floor" (Appendix E). Order statistics can only return values on the pitch encoder's output grid, so on pYIN data their confidence intervals collapse to zero width and they must be read as naming a $5$-cent cell rather than as measurements. The trimmed mean is the recommended single robust figure because it averages the surviving values rather than selecting one, and so remains resolvable while still discarding the heavy tails.
+
 ---
 
 ## 10. References & Bibliography
@@ -1348,6 +1362,8 @@ The track subset is deterministic — the first five tracks of each instrument i
 
 > [!IMPORTANT]
 > **The median $|\text{Deviation\_Cents}|$ is not reportable at this resolution.** It takes exactly **one** distinct value — $10.00$ cents — across all 30 grid cells. `librosa.pyin()` quantises $f_0$ onto a grid of `resolution` $= 0.1$ semitones, so every deviation is a multiple of 10 cents and the median collapses onto that grid regardless of parameters. The **mean** is used as the accuracy axis throughout this section. This 10-cent quantisation is a property of the pitch engine, not of the parameters under test, and it bounds the resolution of any single-note deviation figure this system reports.
+>
+> This behaviour is characterised in full, with a continuous-engine control, in "Distributional Statistics & the Quantization Resolution Floor" below.
 
 #### 4. Slope Filter Rejection Rate
 
@@ -1454,6 +1470,8 @@ Included-note counts fall from 2,388 (at $\tau = 0.001$, $m = 1$) to 205 (at $\t
 
 > [!IMPORTANT]
 > The median $|\text{Deviation\_Cents}|$ again takes exactly **one** distinct value — $10.00$ cents — across all 30 cells, reproducing the finding of the slope/`switch_prob` ablation. This is the 10-cent `resolution = 0.1` semitone quantisation of `librosa.pyin()`, not a property of the parameters under test. **Mean $|\text{dev}|$ is the accuracy axis throughout.** The P90 is likewise near-degenerate, sitting at $20$ cents in 23 of 30 cells and rising to $30$ only where the amplitude gate has destroyed most of the sample.
+>
+> The subsection "Distributional Statistics & the Quantization Resolution Floor" below closes this question: aggregating over a larger note population does not restore the median's resolution but removes what little it had, and a trimmed mean is identified as the robust statistic that survives the lattice.
 
 #### 4. Filter-Action Diagnostics
 
@@ -1529,3 +1547,162 @@ The `confidence_threshold` sweep was run on synthetic tones rather than URMP aud
 > **`rms_threshold` genuinely matters, and it is the only parameter that does.** Over its swept range detection yield spans 87 percentage points — two orders of magnitude more than any other parameter — because it directly gates 14% to 97% of all voiced frames. Any result in this manual is conditional on the amplitude gate, and a reader wishing to reproduce these figures must match it. Within the working range $0.001 \le \tau \le 0.005$ the span narrows to 4.26 pp, so the engine is *locally* stable around its default even though it is *globally* sensitive; the collapse is confined to $\tau \ge 0.01$, settings no plausible tuning process would select.
 >
 > **Two caveats are carried forward rather than resolved.** First, the adaptive noise floor means the nominal `rms_threshold` is inert on 40% of URMP tracks at the default, and the sweep shows the floor alone outperforming the fixed value — a Pareto improvement of $+2.90$ pp yield and $-0.20$ c mean deviation is available at $\tau = 0.0025$ and has not been adopted pending validation on a second corpus. Second, the apparent accuracy *gain* at aggressive settings ($10.37$ c mean at $\tau = 0.05$, $m = 16$, versus $10.89$ c at production) is the same selection artefact identified for $\theta_{slope} = 0.10$ above: those cells retain only 54 of 2,326 included notes, and what survives an aggressive gate is the loud, stable, well-tuned core of each note. Optimising mean deviation over this grid would select a configuration that measures almost nothing very accurately.
+
+### Distributional Statistics & the Quantization Resolution Floor
+
+Every summary reported by this system up to this point has been a **mean**, usually with a standard deviation. That pairing is a complete description of a sample only when the sample is normally distributed, and no evidence had been offered that these samples are. This subsection tests the assumption, reports the robust and shape statistics a non-normal distribution requires, and resolves a measurement-resolution problem that surfaced twice in the ablations above. The script `validate_distribution_stats.py` implements the study.
+
+#### Testing Methodology
+
+Both engines ran the full production pipeline at Engine Optimal Default parameters over the same deterministic 15-track URMP subset used by the slope/`switch_prob` and `rms`/`min_frames` ablations, so all three studies are directly comparable. Notes excluded by `is_note_excluded()` are dropped, matching the production summary. Three samples are analysed:
+
+| Sample | What it is | $n$ |
+| :--- | :--- | :---: |
+| **pYIN** | Per-note `Deviation_Cents` in DTW mode | 2,326 |
+| **REAPER** | The same, from the continuous-output engine | 2,140 |
+| **pYIN frames** | Raw frame deviations in Legacy mode, before any per-note median | 75,471 |
+
+**REAPER is the control.** It estimates pitch in the continuous time domain and has no output lattice (§3B). Any degeneracy that appears in the pYIN order statistics but not in REAPER's is therefore caused by the pYIN encoder, not by the music. This design is what converts a suspicion into a measurement.
+
+The nominal `rms_threshold` binds on 9 of 15 tracks (60%); on the remainder the adaptive noise floor of §4A governs, with effective thresholds up to $0.0181$. The effective value is instrumented rather than assumed, for the reasons given in the "Comprehensive Parameter Sensitivity" callout above.
+
+#### 1. The Deviation Distributions Are Not Normal
+
+| Statistic (cents) | pYIN | REAPER | pYIN frames |
+| :--- | :---: | :---: | :---: |
+| $n$ | 2,326 | 2,140 | 75,471 |
+| Mean | $+1.74$ | $+0.29$ | $+2.10$ |
+| Standard deviation | 15.69 | 18.26 | 27.50 |
+| Median | $+0.00$ | $+1.41$ | $+0.00$ |
+| IQR | 20.00 | 23.71 | 20.00 |
+| **Skewness (G1)** | $+0.752$ | $-0.001$ | $+0.012$ |
+| **Excess kurtosis (G2)** | $\mathbf{+4.812}$ | $+1.227$ | $\mathbf{+14.513}$ |
+| D'Agostino–Pearson $p$ | $2.1 \times 10^{-94}$ | $5.9 \times 10^{-13}$ | $< 10^{-300}$ |
+
+> [!IMPORTANT]
+> **The tails are the finding, and they justify the whole exercise.** Excess kurtosis is $+4.81$ on per-note pYIN deviations and $+14.51$ at frame level, against $0$ for a Gaussian. These distributions have far more extreme values than a normal distribution of the same standard deviation would produce, which is precisely the condition under which "mean $\pm$ SD" stops describing a typical note: the SD is inflated by a small population of large excursions, and the interval $\bar{x} \pm \sigma$ neither contains the stated fraction of the data nor characterises ordinary playing. The frame-level sample is the more extreme because per-note medians average the outliers away before the DTW summary ever sees them — the DTW mode is, in this specific sense, already partially robust.
+>
+> The formal $p$-values are reported for completeness only. At $n$ in the thousands any normality test rejects on a trivial departure, so the **effect sizes** carry the argument, not the significance.
+
+![Deviation Distributions vs Normal](images/deviation_distribution.png)
+
+The right panel is the argument in one image: the observed pYIN distribution is far more sharply peaked than the fitted normal of the same mean and standard deviation, with the excess mass reappearing in the tails. The left panel already previews the next finding — the blue pYIN histogram is a **comb**, with tall bars on multiples of 10 cents and near-empty bars between them, while the orange REAPER histogram is smooth.
+
+![Normal Q-Q Plots](images/deviation_qq.png)
+
+The Q-Q plots separate the two effects cleanly. All three samples depart from the reference line at both ends, which is the heavy-tail signature. Only the pYIN panels additionally show a **staircase** — flat treads where many notes share one lattice value — and REAPER, run on the same repertoire under the same filters, shows a smooth continuum. That contrast is the subject of the next section.
+
+#### 2. The Resolution Floor
+
+`librosa.pyin()` decodes $f_0$ on a grid of `resolution` $= 0.1$ semitones. Because the instrument `fmin` values of §2 are exact integer MIDI notes, that grid lands on integer-MIDI $+\ 0.1k$, so every **frame** deviation is an exact multiple of $10$ cents. A DTW **per-note** deviation is the median of those frames, which halves the step to $5$ cents on even-sized note islands. Measured directly:
+
+| Sample | Lattice step | Distinct values | On-lattice fraction | Max residual | IQR in steps |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| pYIN (per-note) | 5.0 c | **29** | **95.9%** | 0.065 c | 4.00 |
+| REAPER (per-note) | 5.0 c | **395** | **0.0%** | 2.491 c | 4.74 |
+| pYIN (frame) | 10.0 c | **48** | **100.0%** | 0.000 c | 2.00 |
+
+The control behaves exactly as predicted. On statistically comparable data — 2,140 notes against 2,326, the same repertoire under the same filters — REAPER produces **395** distinct deviation values while pYIN produces **29**, a ratio of nearly $14:1$, and not one REAPER value falls on the lattice. The entire measured intonation behaviour of fifteen string performances is being expressed by pYIN in 29 possible numbers.
+
+> [!NOTE]
+> **Distinct values are counted after rounding to 4 decimal places.** Deviations reach cents through a $\text{Hz} \rightarrow \text{MIDI} \rightarrow \text{cents}$ chain in float64, so two results representing the same decoded pitch can differ in the last few bits. Counting raw floating-point equality inflates this column with representation noise instead of measuring the encoder — it reports 73, 449 and 128 for the three rows above, more than double the true figures for the pYIN samples. The distinction matters precisely because this column is the evidence, so it is measured rather than taken from a naive `unique()`.
+
+#### 3. Aggregation Does Not Rescue the Median — It Makes the Pinning Worse
+
+The open question carried forward from the two ablations above was whether medians and IQRs computed over a *large* note population escape the degeneracy seen in individual grid cells. They do not, and the reasoning runs opposite to the intuition. The sampling error of a median is approximately $1.253\,\sigma/\sqrt{n}$. While that error exceeds the lattice step, resampling can land the median on different grid points; once $\sqrt{n}$ drives it below the step, **every** resample returns the same grid point. Growing the sample makes the median more perfectly stuck, not less.
+
+Subsamples drawn from the pYIN note population, median re-estimated 200 times at each size:
+
+| Subsample size | 25 | 50 | 100 | 250 | 500 | 1,000 | 2,326 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Distinct medians observed | 10 | 11 | 5 | 3 | 3 | **1** | **1** |
+| SD of medians (c) | 3.58 | 1.20 | 0.56 | 0.00 | 0.00 | 0.00 | 0.00 |
+
+95% percentile-bootstrap intervals on the full population make the consequence explicit. **A zero-width interval means every resample returned the same value: the statistic cannot move.**
+
+| Sample | Median [95% CI] | IQR [95% CI] |
+| :--- | :---: | :---: |
+| pYIN | $+0.00$ $[+0.00, +0.00]$ | $20.00$ $[20.00, 20.00]$ |
+| REAPER | $+1.41$ $[-0.51, +1.41]$ | $23.71$ $[21.76, 25.67]$ |
+| pYIN frames | $+0.00$ $[+0.00, +0.00]$ | $20.00$ $[20.00, 20.00]$ |
+
+> [!IMPORTANT]
+> **On pYIN data the median and the IQR are not measurements.** Both have confidence intervals of exactly zero width — they are labels for a lattice cell, and quoting them to two decimal places implies a precision the encoder cannot deliver. REAPER's median and IQR, computed on the same repertoire under the same filters, carry ordinary non-degenerate intervals, which confirms that the cause is the encoder rather than the music or the sample size.
+>
+> This supersedes and explains the two earlier observations in this appendix that the median $|\text{Deviation\_Cents}|$ took the single value $10.00$ across all 30 cells of both ablation grids. That was not a coincidence of those parameter ranges; it is the general behaviour of any order statistic computed on this engine's output.
+
+#### 4. Resolution: the Trimmed Mean
+
+The two findings above are in tension. §1 establishes that the distributions are heavy-tailed, which argues for a robust estimator in place of the mean. §3 establishes that the robust estimators normally reached for — median, quartiles, IQR — are *order statistics*, and on a quantized encoder they can only ever return a lattice value. The statistic that satisfies both constraints at once is the **symmetrically trimmed mean**: it discards a fixed proportion of each tail, so it is robust, but it then *averages* the surviving values, so it dithers off the lattice exactly as the ordinary mean does and retains full resolution.
+
+Measured on the same samples, with 10% trimmed from each tail:
+
+| Sample | Median [95% CI] | 10%-trimmed mean [95% CI] | Mean [95% CI] |
+| :--- | :---: | :---: | :---: |
+| pYIN | $+0.00$ $[+0.00, +0.00]$ | $+1.38$ $[+0.77, +2.00]$ | $+1.74$ $[+1.11, +2.37]$ |
+| REAPER | $+1.41$ $[-0.51, +1.41]$ | $+0.79$ $[+0.04, +1.58]$ | $+0.29$ $[-0.47, +1.09]$ |
+| pYIN frames | $+0.00$ $[+0.00, +0.00]$ | $+1.75$ $[+1.63, +1.88]$ | $+2.10$ $[+1.91, +2.30]$ |
+
+The contrast is direct and on identical data: pYIN's median has an interval of width $0$ cents, while its trimmed mean has an interval of width $1.23$ cents — a genuine, reportable measurement of central tendency. The trimmed mean also sits *below* the ordinary mean in every pYIN sample ($+1.38$ vs $+1.74$ per-note; $+1.75$ vs $+2.10$ per-frame), which is the expected consequence of discarding the positively-skewed tail identified in §1.
+
+> [!NOTE]
+> **What this system should report, and why.**
+>
+> - The **mean** is unaffected by the resolution floor — a sum over many lattice values dithers off the grid — but §1 shows it is not representative of a typical note.
+> - The **median and IQR** are representative but, on pYIN, unresolvable. They are still reported: a reader expects them, and their degeneracy is itself a property of the engine worth stating. They must not be read to two decimals.
+> - The **10%-trimmed mean** is both. It is the figure to quote when a single robust location estimate is wanted from pYIN data.
+> - **Skewness and kurtosis** are moment-based, not order-based, so they are unaffected by the lattice and are fully reportable at both frame and note level.
+>
+> These four statements are implemented directly: `src/stats_summary.py` computes all of them, and both the Legacy and DTW summary panels in the application display the full set with the resolution caveat attached.
+
+#### 5. Bland–Altman Agreement (pYIN vs REAPER)
+
+The inter-engine study of §4A above reported a Pearson $r$ of $0.7312$ across all 58 tracks. Correlation answers "do the two engines rank notes in the same order?", which is not the question a method comparison asks. The question is "by how much can they disagree about any one note?", and the statistic that answers it is the 95% limits of agreement.
+
+| Statistic | This study (15 tracks) | §4A (58 tracks) |
+| :--- | :---: | :---: |
+| Paired notes | 2,066 | 9,299 |
+| Bias (pYIN $-$ REAPER) | $+0.70$ c | $-0.57$ c |
+| SD of differences | 12.77 c | 12.87 c |
+| 95% Limits of Agreement | $[-24.34, +25.74]$ c | $[-25.78, +24.65]$ c |
+
+> [!NOTE]
+> **The two studies agree, and the agreement is the point.** Run on a 15-track subset with an independent code path, the limits of agreement reproduce the 58-track result to within 1.5 cents at both ends, and the SD of differences to within $0.1$ c. The bias changes sign between the two ($+0.70$ vs $-0.57$ cents) but both are far smaller than the measurement resolution of either engine and neither is distinguishable from zero in practical terms — the engines carry no systematic offset relative to one another.
+>
+> The **width** of the limits is the substantive finding, and it is a caution rather than a reassurance: the two engines can disagree by roughly $\pm 25$ cents — a quarter-semitone — on an individual note, even though they agree almost perfectly on average. Aggregate conclusions in this manual are robust to the choice of engine; **single-note claims are not**, and should not be made from one engine's output alone.
+
+![Bland-Altman: pYIN vs REAPER](images/bland_altman_pyin_reaper.png)
+
+The diagonal striping visible in the scatter is a further trace of the pYIN lattice: with the difference on one axis and the pair mean on the other, a quantized $x$-coordinate maps every note onto one of a family of parallel lines.
+
+#### 6. Duplicate Audio in the Shared Track Subset
+
+Instrumenting the subset by content hash revealed that **2 of the 15 stems are byte-identical to another stem**. URMP reuses one recorded take across pieces that differ only in another part: `24_Pirates` and `25_Pirates` share a single viola take, as do `26_King` and `27_King`.
+
+> [!IMPORTANT]
+> **This affects the results of the two ablation studies above, which use the same subset.** The duplicated notes are counted twice in every pooled statistic. This does **not** bias any location estimate — the duplicate carries identical values, so means, medians and yields are unchanged — but it inflates $n$ and therefore understates every standard error and confidence interval derived from the pooled population. Roughly 636 of the 2,326 included notes come from the two duplicated pairs.
+>
+> The effect on the ablations of the preceding two subsections is nil for the reported quantities, which are all yields and means rather than intervals. It matters here because this subsection reports confidence intervals, and it is recorded so that any future study using this subset accounts for it rather than rediscovering it.
+
+A de-duplicated statistic set is computed alongside the pooled one:
+
+| Statistic (cents) | Pooled ($n = 2{,}326$) | De-duplicated ($n = 2{,}008$) |
+| :--- | :---: | :---: |
+| Mean | $+1.74$ | $+3.40$ |
+| Standard deviation | 15.69 | 15.39 |
+| 10%-trimmed mean | $+1.38$ | $+3.09$ |
+| Skewness (G1) | $+0.752$ | $+0.655$ |
+| Excess kurtosis (G2) | $+4.812$ | $+5.146$ |
+| On-lattice fraction | 95.9% | 96.1% |
+
+> [!NOTE]
+> **Every qualitative conclusion of this subsection survives de-duplication.** The distribution remains strongly non-normal (G2 rises slightly, from $+4.81$ to $+5.15$), the lattice fraction is unchanged at ~96%, and the median remains pinned at $+0.00$ with a zero-width interval. The location estimates do shift by about $1.7$ cents — the two duplicated stems happen to be better-tuned than the corpus average, so removing their double-weighting raises the mean — which is a reminder that the 15-track subset is small enough for individual tracks to move an aggregate, and that these figures characterise the *measurement instrument*, not the URMP corpus.
+
+#### Overall Verdict
+
+> [!NOTE]
+> **The mean-and-SD summary was insufficient, and is now supplemented rather than replaced.** Both deviation distributions are demonstrably non-normal, with excess kurtosis of $+4.81$ per-note and $+14.51$ per-frame. Median, IQR, skewness and kurtosis are now computed and displayed in both Legacy and DTW modes, in cents and in Hertz, alongside distribution and Bland–Altman plots.
+>
+> **The open question from the earlier ablations is closed, with the answer that was not expected.** Aggregating over a large note population does not make the median meaningful; it pins it harder, because the sampling error falls below the lattice step. On pYIN data the median and IQR have zero-width bootstrap intervals and must be read as lattice labels, not measurements. The REAPER control confirms the encoder as the cause.
+>
+> **A usable robust statistic exists and is now reported.** The 10%-trimmed mean is robust to the heavy tails *and* immune to the resolution floor, because it averages rather than selects. It is the recommended single-figure summary for pYIN intonation data, and the resolution floor is documented wherever an order statistic is displayed.
