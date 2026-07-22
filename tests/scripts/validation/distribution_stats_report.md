@@ -1,21 +1,12 @@
 # Distributional Statistics & Quantization Resolution Floor
 
-Generated: 2026-07-22 09:05
+Generated: 2026-07-22 21:37
 
 ## Methodology
 
-Both engines ran the full production pipeline (extract → intonation filters → DTW alignment → harmonic folding → per-note metrics) at Engine Optimal Default parameters over a deterministic subset of 15 URMP bowed-string tracks (first 5 per instrument in sorted path order) — the same subset as `validate_slope_switchprob.py` and `validate_rms_minframes.py`. Notes excluded by `is_note_excluded()` (|dev| > 100 cents or harmonic folding applied) are dropped, matching the production summary.
+Both engines ran the full production pipeline (extract → intonation filters → DTW alignment → harmonic folding → per-note metrics) at Engine Optimal Default parameters over all 41 bowed-string stems of the URMP corpus — the same set as `validate_slope_switchprob.py` and `validate_rms_minframes.py`. Notes excluded by `is_note_excluded()` (|dev| > 100 cents or harmonic folding applied) are dropped, matching the production summary.
 
 REAPER serves as the **control**: it returns continuous f0, so any degeneracy present in the pYIN order statistics but absent from REAPER's is caused by the pYIN output lattice rather than by the music.
-
-### Duplicate audio in the shared subset
-
-2 of the 15 selected stems are **byte-identical** to an earlier stem. URMP reuses one recorded take across pieces that differ only in another part:
-
-- `AuSep_3_va_25_Pirates` is identical to `AuSep_3_va_24_Pirates`
-- `AuSep_3_va_27_King` is identical to `AuSep_3_va_26_King`
-
-Their notes are therefore counted twice in the pooled population. This does not bias the location estimates — the duplicated notes carry the same values — but it inflates $n$ and so understates every confidence interval and standard error below. A de-duplicated row (13 unique stems) is reported alongside the pooled one so the two can be compared directly. **This subset is shared with `validate_slope_switchprob.py` and `validate_rms_minframes.py`, so the same duplication applies to the results of roadmap tasks #5 and #8.**
 
 ### Effective RMS threshold (adaptive override)
 
@@ -23,36 +14,35 @@ Their notes are therefore counted twice in the pooled population. This does not 
 
 | Engine | Nominal | Median effective | Max effective | Tracks where nominal binds |
 | :--- | :---: | :---: | :---: | :---: |
-| pYIN | 0.0050 | 0.0050 | 0.0181 | 9/15 (60%) |
-| REAPER | 0.0050 | 0.0050 | 0.0182 | 9/15 (60%) |
+| pYIN | 0.0050 | 0.0058 | 0.0181 | 18/41 (44%) |
+| REAPER | 0.0050 | 0.0058 | 0.0182 | 18/41 (44%) |
 
 ## 1. Descriptive Statistics
 
-| Statistic (cents) | pYIN | REAPER | pYIN (frame-level, legacy mode) | pYIN (de-duplicated audio) |
-| :--- | :---: | :---: | :---: | :---: |
-| Sample size (n) | 2326 | 2140 | 75471 | 2008 |
-| Mean | +1.74 | +0.29 | +2.10 | +3.40 |
-| Standard deviation | 15.69 | 18.26 | 27.50 | 15.39 |
-| Standard error of mean | 0.325 | 0.395 | 0.100 | 0.343 |
-| Median | -0.00 | +1.41 | +0.00 | +0.00 |
-| Q1 | -10.00 | -8.27 | -10.00 | -4.99 |
-| Q3 | +10.00 | +15.44 | +10.00 | +10.00 |
-| IQR | 20.00 | 23.71 | 20.00 | 14.99 |
-| Median absolute deviation | 10.00 | 12.08 | 10.00 | 10.00 |
-| 10%-trimmed mean | +1.38 | +0.79 | +1.75 | +3.09 |
-| Skewness (G1) | +0.752 | -0.001 | +0.012 | +0.655 |
-| Excess kurtosis (G2) | +4.812 | +1.227 | +14.513 | +5.146 |
-| Minimum | -100.00 | -90.21 | -240.00 | -100.00 |
-| Maximum | +100.00 | +83.66 | +240.00 | +100.00 |
+| Statistic (cents) | pYIN | REAPER | pYIN (frame-level, legacy mode) |
+| :--- | :---: | :---: | :---: |
+| Sample size (n) | 8197 | 6863 | 284881 |
+| Mean | +7.13 | +6.57 | +6.29 |
+| Standard deviation | 16.35 | 18.91 | 32.38 |
+| Standard error of mean | 0.181 | 0.228 | 0.061 |
+| Median | +10.00 | +9.79 | +10.00 |
+| Q1 | -0.00 | -6.96 | -0.00 |
+| Q3 | +20.00 | +19.35 | +20.00 |
+| IQR | 20.00 | 26.32 | 20.00 |
+| Median absolute deviation | 10.00 | 11.52 | 10.00 |
+| 10%-trimmed mean | +7.04 | +7.09 | +6.86 |
+| Skewness (G1) | -0.253 | -0.382 | -0.214 |
+| Excess kurtosis (G2) | +4.175 | +1.511 | +10.477 |
+| Minimum | -100.00 | -98.55 | -350.00 |
+| Maximum | +100.00 | +93.04 | +310.00 |
 
 ## 2. Normality of the Deviation Distribution
 
 | Engine | Skewness (G1) | Excess kurtosis (G2) | D'Agostino-Pearson K² | p |
 | :--- | :---: | :---: | :---: | :---: |
-| pYIN | +0.752 | +4.812 | 431.4 | 2.14e-94 |
-| REAPER | -0.001 | +1.227 | 56.3 | 5.92e-13 |
-| pYIN (frame-level, legacy mode) | +0.012 | +14.513 | 15897.1 | < 1e-300 |
-| pYIN (de-duplicated audio) | +0.655 | +5.146 | 353.5 | 1.71e-77 |
+| pYIN | -0.253 | +4.175 | 867.3 | 4.67e-189 |
+| REAPER | -0.382 | +1.511 | 386.8 | 9.93e-85 |
+| pYIN (frame-level, legacy mode) | -0.214 | +10.477 | 52833.9 | < 1e-300 |
 
 At these sample sizes any formal test rejects normality on a trivial departure, so the *effect sizes* carry the argument. Excess kurtosis is the operative number: it measures how much heavier the tails are than a Gaussian's, and heavy tails are precisely the condition under which the mean and SD stop describing the typical note. See `docs/images/deviation_qq.png` for the tail behaviour directly.
 
@@ -62,10 +52,9 @@ At these sample sizes any formal test rejects normality on a trivial departure, 
 
 | Sample | Assumed step (c) | Distinct values | On-lattice fraction | Max residual (c) | IQR in steps | SD | Sheppard-corrected SD |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| pYIN | 5.0 | 29 | 95.9% | 0.0650 | 4.00 | 15.69 | 15.62 |
-| REAPER | 5.0 | 395 | 0.0% | 2.4911 | 4.74 | 18.26 | 18.20 |
-| pYIN (frame-level, legacy mode) | 10.0 | 48 | 100.0% | 0.0000 | 2.00 | 27.50 | 27.35 |
-| pYIN (de-duplicated audio) | 5.0 | 29 | 96.1% | 0.0650 | 3.00 | 15.39 | 15.32 |
+| pYIN | 5.0 | 56 | 95.4% | 2.3948 | 4.00 | 16.35 | 16.28 |
+| REAPER | 5.0 | 1052 | 0.0% | 2.4911 | 5.26 | 18.91 | 18.85 |
+| pYIN (frame-level, legacy mode) | 10.0 | 63 | 100.0% | 0.0000 | 2.00 | 32.38 | 32.25 |
 
 ### Does aggregation rescue the median?
 
@@ -73,14 +62,14 @@ Subsamples of increasing size are drawn without replacement from the pYIN note p
 
 | Subsample size | Median of medians | SD of medians | 95% range | Distinct medians observed |
 | :---: | :---: | :---: | :---: | :---: |
-| 25 | +0.00 | 3.58 | [-0.00, +10.00] | 10 |
-| 50 | +0.00 | 1.20 | [-0.00, +0.06] | 11 |
-| 100 | +0.00 | 0.56 | [-0.00, +0.00] | 5 |
-| 250 | +0.00 | 0.00 | [-0.00, +0.00] | 3 |
-| 500 | +0.00 | 0.00 | [-0.00, +0.00] | 3 |
-| 1000 | +0.00 | 0.00 | [+0.00, +0.00] | 1 |
-| 2000 | +0.00 | 0.00 | [+0.00, +0.00] | 1 |
-| 2326 | +0.00 | 0.00 | [+0.00, +0.00] | 1 |
+| 25 | +10.00 | 4.69 | [-0.00, +10.00] | 12 |
+| 50 | +10.00 | 4.24 | [+0.00, +10.00] | 15 |
+| 100 | +10.00 | 3.76 | [+0.00, +10.00] | 16 |
+| 250 | +10.00 | 2.37 | [+0.00, +10.00] | 11 |
+| 500 | +10.00 | 1.13 | [+5.01, +10.00] | 10 |
+| 1000 | +10.00 | 0.00 | [+10.00, +10.00] | 3 |
+| 2000 | +10.00 | 0.00 | [+10.00, +10.00] | 2 |
+| 8197 | +10.00 | 0.00 | [+10.00, +10.00] | 1 |
 
 ### Bootstrap intervals on the full population
 
@@ -88,19 +77,18 @@ A 95% percentile bootstrap interval of **zero width** is the diagnostic: it mean
 
 | Sample | Median [95% CI] | IQR [95% CI] | 10%-trimmed mean [95% CI] | Mean [95% CI] |
 | :--- | :---: | :---: | :---: | :---: |
-| pYIN | +0.00 [+0.00, +0.00] | 20.00 [20.00, 20.00] | +1.38 [+0.76, +1.98] | +1.74 [+1.10, +2.37] |
-| REAPER | +1.41 [-0.51, +1.41] | 23.71 [21.76, 25.67] | +0.79 [+0.02, +1.58] | +0.29 [-0.48, +1.05] |
-| pYIN (frame-level, legacy mode) | +0.00 [+0.00, +0.00] | 20.00 [20.00, 20.00] | +1.75 [+1.63, +1.89] | +2.10 [+1.91, +2.30] |
-| pYIN (de-duplicated audio) | +0.00 [+0.00, +0.00] | 14.99 [10.00, 20.00] | +3.09 [+2.53, +3.65] | +3.40 [+2.72, +4.06] |
+| pYIN | +10.00 [+10.00, +10.00] | 20.00 [20.00, 20.00] | +7.04 [+6.70, +7.38] | +7.13 [+6.77, +7.47] |
+| REAPER | +9.79 [+9.79, +11.96] | 26.32 [26.32, 27.11] | +7.09 [+6.67, +7.51] | +6.57 [+6.12, +7.01] |
+| pYIN (frame-level, legacy mode) | +10.00 [+10.00, +10.00] | 20.00 [20.00, 20.00] | +6.86 [+6.78, +6.93] | +6.29 [+6.18, +6.41] |
 
 **Recommendation.** On pYIN data the median and IQR are order statistics and can only return lattice values, so their intervals collapse; the mean and the 10%-trimmed mean are *averages* of many lattice values and dither off the grid, retaining full resolution. Since the distribution is heavy-tailed (§2), the ordinary mean is not representative either. The trimmed mean is the statistic that satisfies both constraints simultaneously: robust to the tails, and unaffected by the resolution floor. The median and IQR are still reported — they are what a reader expects to see, and their degeneracy is itself a reportable property of the engine — but they should not be read to two decimal places.
 
 ## 4. Bland-Altman Agreement (pYIN vs REAPER)
 
-- **Paired notes**: 2066
-- **Bias** (pYIN − REAPER): +0.70 cents
-- **SD of differences**: 12.77 cents
-- **95% Limits of Agreement**: [-24.34, +25.74] cents
+- **Paired notes**: 6639
+- **Bias** (pYIN − REAPER): -0.18 cents
+- **SD of differences**: 13.06 cents
+- **95% Limits of Agreement**: [-25.78, +25.41] cents
 
 Plot: `docs/images/bland_altman_pyin_reaper.png`. The limits of agreement, not the bias, are the number that matters: they state how far the two engines can disagree on any single note, which a correlation coefficient never reveals.
 

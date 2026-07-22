@@ -19,7 +19,7 @@ Task #6 of the academic validation roadmap. Two questions, one run:
 REAPER is the control. It returns continuous f0 with no output lattice, so any
 degeneracy present in the pYIN statistics but absent from REAPER's is attributable
 to quantization rather than to the music. Both engines run the full production
-pipeline over the same deterministic 15-track subset used by
+pipeline over every bowed-string stem in the URMP corpus — the same set used by
 `validate_slope_switchprob.py` and `validate_rms_minframes.py`, so the three
 studies are directly comparable.
 
@@ -43,7 +43,6 @@ import os
 import sys
 import gc
 import json
-import hashlib
 import numpy as np
 import warnings
 from pathlib import Path
@@ -96,7 +95,6 @@ TOGGLES = {
 
 INST_MAP = {"vn": "Violin", "va": "Viola", "vc": "Cello"}
 REFERENCE_PITCH_HZ = 440.0
-TRACKS_PER_INSTRUMENT = 5
 
 # Note-population sizes at which the aggregate median is re-estimated, to see
 # whether its bootstrap interval ever narrows below the output lattice.
@@ -238,40 +236,11 @@ def discover_tracks(dataset_dir):
     return tracks
 
 
-def select_subset(tracks, per_instrument):
-    """First `per_instrument` tracks of each instrument, in sorted path order."""
-    subset = []
-    for inst in ["Violin", "Viola", "Cello"]:
-        inst_tracks = [t for t in tracks if t['instrument'] == inst]
-        if len(inst_tracks) < per_instrument:
-            print(f"  [!] Only {len(inst_tracks)} {inst} tracks available "
-                  f"(requested {per_instrument})")
-        subset.extend(inst_tracks[:per_instrument])
-    return subset
-
-
-def mark_duplicate_audio(tracks):
-    """
-    Flags tracks whose audio file is byte-identical to one already seen.
-
-    URMP reuses the same recorded stem across pieces that differ only in another
-    part — 24_Pirates and 25_Pirates share one viola take, as do 26_King and
-    27_King. Any statistic computed over the pooled note population therefore
-    counts those notes twice, which does not bias the location estimates but does
-    inflate n and so understates every confidence interval. This is a property of
-    the shared 15-track subset, so it applies equally to the slope/switch_prob and
-    rms/min_frames studies that use it. Detected rather than assumed, and reported
-    alongside a de-duplicated statistic set.
-    """
-    seen = {}
+def instrument_counts(tracks):
+    counts = {}
     for t in tracks:
-        with open(t['audio_path'], 'rb') as f:
-            digest = hashlib.md5(f.read()).hexdigest()
-        t['audio_md5'] = digest
-        t['duplicate_of'] = seen.get(digest)
-        if digest not in seen:
-            seen[digest] = t['stem']
-    return tracks
+        counts[t['instrument']] = counts.get(t['instrument'], 0) + 1
+    return counts
 
 
 def load_midi_notes(midi_path, target_track):
@@ -526,37 +495,16 @@ def generate_report(payload):
     lines.append("")
     lines.append(f"Both engines ran the full production pipeline (extract → intonation filters → "
                  f"DTW alignment → harmonic folding → per-note metrics) at Engine Optimal Default "
-                 f"parameters over a deterministic subset of {payload['n_tracks']} URMP bowed-string "
-                 f"tracks (first {TRACKS_PER_INSTRUMENT} per instrument in sorted path order) — the "
-                 f"same subset as `validate_slope_switchprob.py` and `validate_rms_minframes.py`. "
-                 f"Notes excluded by `is_note_excluded()` (|dev| > 100 cents or harmonic folding "
-                 f"applied) are dropped, matching the production summary.")
+                 f"parameters over all {payload['n_tracks']} bowed-string stems of the URMP "
+                 f"corpus — the same set as `validate_slope_switchprob.py` and "
+                 f"`validate_rms_minframes.py`. Notes excluded by `is_note_excluded()` "
+                 f"(|dev| > 100 cents or harmonic folding applied) are dropped, matching the "
+                 f"production summary.")
     lines.append("")
     lines.append(f"REAPER serves as the **control**: it returns continuous f0, so any degeneracy "
                  f"present in the pYIN order statistics but absent from REAPER's is caused by the "
                  f"pYIN output lattice rather than by the music.")
     lines.append("")
-
-    dupes = payload.get('duplicate_audio') or []
-    if dupes:
-        lines.append("### Duplicate audio in the shared subset")
-        lines.append("")
-        lines.append(f"{len(dupes)} of the {payload['n_tracks']} selected stems are "
-                     f"**byte-identical** to an earlier stem. URMP reuses one recorded take "
-                     f"across pieces that differ only in another part:")
-        lines.append("")
-        for d in dupes:
-            lines.append(f"- `{d['stem']}` is identical to `{d['duplicate_of']}`")
-        lines.append("")
-        lines.append(f"Their notes are therefore counted twice in the pooled population. This does "
-                     f"not bias the location estimates — the duplicated notes carry the same values "
-                     f"— but it inflates $n$ and so understates every confidence interval and "
-                     f"standard error below. A de-duplicated row "
-                     f"({payload['n_unique_tracks']} unique stems) is reported alongside the pooled "
-                     f"one so the two can be compared directly. **This subset is shared with "
-                     f"`validate_slope_switchprob.py` and `validate_rms_minframes.py`, so the same "
-                     f"duplication applies to the results of roadmap tasks #5 and #8.**")
-        lines.append("")
 
     # --- Adaptive RMS instrumentation ---
     lines.append("### Effective RMS threshold (adaptive override)")
@@ -716,21 +664,14 @@ def main():
 
     os.makedirs(IMAGES_DIR, exist_ok=True)
 
-    tracks = mark_duplicate_audio(select_subset(discover_tracks(dataset_dir),
-                                                TRACKS_PER_INSTRUMENT))
-    duplicates = [t for t in tracks if t['duplicate_of']]
-    print(f"\n[INFO] {len(tracks)} tracks selected.")
-    if duplicates:
-        print(f"[WARN] {len(duplicates)} track(s) are byte-identical duplicates of an "
-              f"earlier stem — statistics are reported both pooled and de-duplicated:")
-        for t in duplicates:
-            print(f"         {t['stem']} == {t['duplicate_of']}")
-    print()
+    tracks = discover_tracks(dataset_dir)
+    counts = instrument_counts(tracks)
+    print(f"\n[INFO] Full corpus: {len(tracks)} string tracks "
+          f"({', '.join(f'{n} {inst.lower()}' for inst, n in sorted(counts.items()))}).\n")
     if not tracks:
         sys.exit(1)
 
     note_devs = {"pYIN": [], "REAPER": []}
-    unique_note_devs = {"pYIN": [], "REAPER": []}
     frame_devs = {"pYIN": [], "REAPER": []}
     paired_pyin, paired_reaper = [], []
     rms_records = {"pYIN": [], "REAPER": []}
@@ -738,7 +679,11 @@ def main():
     for i, t in enumerate(tracks, 1):
         print(f"[{i}/{len(tracks)}] {t['stem']} ({t['instrument']})", flush=True)
 
-        midi_notes = load_midi_notes(t['midi_path'], t['target_track'])
+        try:
+            midi_notes = load_midi_notes(t['midi_path'], t['target_track'])
+        except MidiTrackError as exc:
+            print(f"  [!] {exc}")
+            continue
         if not midi_notes:
             print("  [!] No MIDI notes, skipping")
             continue
@@ -754,8 +699,6 @@ def main():
 
             devs = included_note_deviations(metrics, auto_excluded_indices(metrics))
             note_devs[engine].append(devs)
-            if not t['duplicate_of']:
-                unique_note_devs[engine].append(devs)
             frame_devs[engine].append(legacy)
             print(f"    {engine:<6} included notes: {devs.size:4d}  "
                   f"effective rms={eff_rms:.5f} ({'nominal' if binding else 'adaptive'})")
@@ -774,8 +717,6 @@ def main():
 
     samples = {engine: np.concatenate(v) if v else np.array([])
                for engine, v in note_devs.items()}
-    unique_samples = {engine: np.concatenate(v) if v else np.array([])
-                      for engine, v in unique_note_devs.items()}
     pyin_frames = np.concatenate(frame_devs['pYIN']) if frame_devs['pYIN'] else np.array([])
 
     # --- Analyses ---
@@ -787,9 +728,6 @@ def main():
     }
     analyses["pYIN (frame-level, legacy mode)"] = analyse_sample(
         pyin_frames, "pYIN frames", step=PYIN_RESOLUTION_CENTS)
-    if duplicates:
-        analyses["pYIN (de-duplicated audio)"] = analyse_sample(
-            unique_samples['pYIN'], "pYIN unique", step=PYIN_NOTE_MEDIAN_RESOLUTION_CENTS)
 
     ba = bland_altman_stats(np.concatenate(paired_pyin) if paired_pyin else np.array([]),
                             np.concatenate(paired_reaper) if paired_reaper else np.array([]))
@@ -843,16 +781,13 @@ def main():
         'generated': datetime.now().isoformat(timespec='seconds'),
         'n_tracks': len(tracks),
         'tracks': [t['stem'] for t in tracks],
-        'duplicate_audio': [{'stem': t['stem'], 'duplicate_of': t['duplicate_of']}
-                            for t in duplicates],
-        'n_unique_tracks': len(tracks) - len(duplicates),
         'engines': ENGINES,
         'analyses': analyses,
         'bland_altman': {k: v for k, v in ba.items() if k not in ('means', 'diffs')},
         'median_convergence': convergence,
         'rms_instrumentation': rms_instrumentation,
         # Raw samples travel with the results so the report and every figure can be
-        # regenerated (`--figures-only`) without a 15-track re-run, and so a reader
+        # regenerated (`--figures-only`) without a full-corpus re-run, and so a reader
         # can verify the statistics rather than take them on trust. Rounded to
         # SAMPLE_DECIMALS: pYIN values are exact multiples of 5 or 10 cents and
         # REAPER's continuous output is meaningless below ~0.01 cents, so full
@@ -863,8 +798,6 @@ def main():
             'pyin_notes': encode_sample(samples['pYIN']),
             'reaper_notes': encode_sample(samples['REAPER']),
             'pyin_frames': encode_sample(pyin_frames),
-            'pyin_notes_unique': encode_sample(unique_samples['pYIN']),
-            'reaper_notes_unique': encode_sample(unique_samples['REAPER']),
             # Kept as flat, index-aligned lists: Bland-Altman needs the pairing.
             'paired_pyin': _round(np.concatenate(paired_pyin) if paired_pyin else np.array([])),
             'paired_reaper': _round(np.concatenate(paired_reaper) if paired_reaper else np.array([])),
@@ -924,10 +857,6 @@ def rebuild_from_sidecar():
         "pYIN (frame-level, legacy mode)": analyse_sample(
             pyin_frames, "pYIN frames", step=PYIN_RESOLUTION_CENTS),
     }
-    if raw.get('pyin_notes_unique') and payload.get('duplicate_audio'):
-        analyses["pYIN (de-duplicated audio)"] = analyse_sample(
-            decode_sample(raw['pyin_notes_unique']), "pYIN unique",
-            step=PYIN_NOTE_MEDIAN_RESOLUTION_CENTS)
     payload['analyses'] = analyses
 
     os.makedirs(IMAGES_DIR, exist_ok=True)

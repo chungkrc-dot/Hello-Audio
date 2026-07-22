@@ -8,9 +8,17 @@ two Engine Optimal Defaults not covered by the confidence-threshold study
   - rms_threshold = 0.005   (amplitude gate on voiced frames)
   - min_frames    = 2       (minimum note-island duration, pYIN)
 
-A full factorial grid of (rms_threshold x min_frames) is swept over the same
-deterministic subset of URMP bowed-string tracks used by
-`validate_slope_switchprob.py`, so the two studies are directly comparable.
+A full factorial grid of (rms_threshold x min_frames) is swept over every
+bowed-string track in the URMP corpus — the same set used by
+`validate_slope_switchprob.py`, so the two studies are directly comparable —
+and each cell is reported both pooled and as a per-track mean with a 95%
+confidence interval.
+
+`rms_threshold` is swept as a nominal value but instrumented as an *effective*
+one: `analyze_intonation()` silently raises it to max(rms_threshold,
+2 x P10(RMS)), so on tracks where the adaptive floor dominates the swept value
+does nothing at all. The binding rate and the mean effective threshold are
+reported per cell for exactly this reason.
 
 Both parameters are consumed *downstream* of `librosa.pyin()`, inside
 `analyze_intonation()`. The expensive pYIN extraction is therefore performed
@@ -40,7 +48,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.pitch_engine import (
     extract_pitch_and_rms, analyze_intonation, generate_filters, apply_duration_filter
 )
-from src.midi_parser import parse_midi_with_timing
+from src.midi_parser import load_part_notes, MidiTrackError
 from src.midi_alignment import process_dtw_alignment, calculate_dtw_metrics, is_note_excluded
 
 REPORT_PATH = os.path.join(SCRIPT_DIR, 'rms_minframes_report.md')
@@ -72,10 +80,6 @@ INST_MAP = {"vn": "Violin", "va": "Viola", "vc": "Cello"}
 # --- Parameter grid ---
 RMS_GRID = [0.001, 0.0025, 0.005, 0.01, 0.02, 0.05]
 MIN_FRAMES_GRID = [1, 2, 4, 8, 16]
-
-# Deterministic subset: first N tracks per instrument (sorted by path).
-# Identical to validate_slope_switchprob.py so the studies are comparable.
-TRACKS_PER_INSTRUMENT = 5
 
 # Reference tuning for all analysis.
 REFERENCE_PITCH_HZ = 440.0
@@ -221,31 +225,39 @@ def discover_tracks(dataset_dir):
     return tracks
 
 
-def select_subset(tracks, per_instrument):
-    """First `per_instrument` tracks of each instrument, in sorted path order."""
-    subset = []
-    for inst in ["Violin", "Viola", "Cello"]:
-        inst_tracks = [t for t in tracks if t['instrument'] == inst]
-        if not inst_tracks:
-            print(f"  [!] No {inst} tracks available in dataset")
-            continue
-        if len(inst_tracks) < per_instrument:
-            print(f"  [!] Only {len(inst_tracks)} {inst} tracks available "
-                  f"(requested {per_instrument})")
-        subset.extend(inst_tracks[:per_instrument])
-    return subset
+def instrument_counts(tracks):
+    counts = {}
+    for t in tracks:
+        counts[t['instrument']] = counts.get(t['instrument'], 0) + 1
+    return counts
 
 
 def load_midi_notes(midi_path, target_track):
-    with open(midi_path, 'rb') as f:
-        midi_notes = parse_midi_with_timing(f, target_track=target_track)
-        if not midi_notes:
-            f.seek(0)
-            midi_notes = parse_midi_with_timing(f, target_track=0)
-        if not midi_notes:
-            f.seek(0)
-            midi_notes = parse_midi_with_timing(f, target_track=1)
+    """Strictly resolve one part; raises MidiTrackError rather than guessing."""
+    midi_notes, _ = load_part_notes(midi_path, part_index=target_track)
     return midi_notes
+
+
+# z for a two-sided 95% interval.
+Z_95 = 1.96
+
+
+def mean_ci(values):
+    """
+    Mean of a per-track statistic with a 95% normal-approximation CI on the mean.
+
+    The unit of replication is the track, not the note: notes within a track are
+    not independent draws, so a note-level interval would be far too narrow.
+    """
+    arr = np.asarray([v for v in values if not np.isnan(v)], dtype=float)
+    n = arr.size
+    if n == 0:
+        return float('nan'), float('nan'), float('nan'), 0
+    mean = float(np.mean(arr))
+    if n < 2:
+        return mean, mean, mean, n
+    half = Z_95 * float(np.std(arr, ddof=1)) / np.sqrt(n)
+    return mean, mean - half, mean + half, n
 
 
 def main():
@@ -262,24 +274,26 @@ def main():
         print(f"Error: Dataset not found at {dataset_dir}")
         sys.exit(1)
 
-    all_tracks = discover_tracks(dataset_dir)
-    tracks = select_subset(all_tracks, TRACKS_PER_INSTRUMENT)
+    tracks = discover_tracks(dataset_dir)
 
-    print(f"\n[INFO] Found {len(all_tracks)} string tracks; "
-          f"using deterministic subset of {len(tracks)} "
-          f"(first {TRACKS_PER_INSTRUMENT} per instrument).\n")
+    counts = instrument_counts(tracks)
+    print(f"\n[INFO] Sweeping the full corpus: {len(tracks)} string tracks "
+          f"({', '.join(f'{n} {inst.lower()}' for inst, n in sorted(counts.items()))}).\n")
 
     if not tracks:
         print("No tracks found. Exiting.")
         sys.exit(1)
 
-    # cells[(rms_threshold, min_frames)] -> accumulators
+    # cells[(rms_threshold, min_frames)] -> accumulators. `track_det_yields` /
+    # `track_mean_devs` hold one value per track so the corpus-level figures can
+    # carry a confidence interval rather than standing as bare point estimates.
     cells = {
         (r, mf): {'total_midi': 0, 'detected': 0, 'included': 0, 'abs_devs': [],
                   'voiced_frames': 0, 'rms_gated_frames': 0,
                   'islands': 0, 'islands_destroyed': 0,
                   'island_frames': 0, 'island_frames_lost': 0,
-                  'binding_tracks': 0, 'n_tracks': 0, 'eff_thresholds': []}
+                  'binding_tracks': 0, 'n_tracks': 0, 'eff_thresholds': [],
+                  'track_det_yields': [], 'track_mean_devs': []}
         for r in RMS_GRID for mf in MIN_FRAMES_GRID
     }
 
@@ -290,7 +304,11 @@ def main():
         instrument = t['instrument']
         print(f"[{i}/{len(tracks)}] {stem} ({instrument})", flush=True)
 
-        midi_notes = load_midi_notes(t['midi_path'], t['target_track'])
+        try:
+            midi_notes = load_midi_notes(t['midi_path'], t['target_track'])
+        except MidiTrackError as exc:
+            print(f"  [!] {exc}")
+            continue
         if not midi_notes:
             print(f"  [!] No MIDI notes found, skipping")
             continue
@@ -340,6 +358,9 @@ def main():
                 c['binding_tracks'] += int(fa['binding'])
                 c['n_tracks'] += 1
                 c['eff_thresholds'].append(fa['effective_threshold'])
+                c['track_det_yields'].append(detected / total_midi * 100)
+                c['track_mean_devs'].append(float(np.mean(abs_devs)) if abs_devs
+                                            else float('nan'))
 
                 row.append(f"mf={mf}:{detected / total_midi * 100:.0f}%")
                 del metrics
@@ -357,7 +378,16 @@ def main():
     results = {}
     for key, c in cells.items():
         devs = np.array(c['abs_devs'])
+        det_mean, det_lo, det_hi, n_tracks = mean_ci(c['track_det_yields'])
+        dev_mean, dev_lo, dev_hi, _ = mean_ci(c['track_mean_devs'])
         results[key] = {
+            'n_tracks_ci': n_tracks,
+            'track_det_yield_mean': det_mean,
+            'track_det_yield_ci_lo': det_lo,
+            'track_det_yield_ci_hi': det_hi,
+            'track_mean_dev_mean': dev_mean,
+            'track_mean_dev_ci_lo': dev_lo,
+            'track_mean_dev_ci_hi': dev_hi,
             'total_midi': c['total_midi'],
             'detected': c['detected'],
             'included': c['included'],
@@ -376,6 +406,10 @@ def main():
             'binding_pct': (c['binding_tracks'] / c['n_tracks'] * 100) if c['n_tracks'] else 0.0,
             'mean_effective_threshold': float(np.mean(c['eff_thresholds']))
                                         if c['eff_thresholds'] else float('nan'),
+            'min_effective_threshold': float(np.min(c['eff_thresholds']))
+                                       if c['eff_thresholds'] else float('nan'),
+            'max_effective_threshold': float(np.max(c['eff_thresholds']))
+                                       if c['eff_thresholds'] else float('nan'),
         }
 
     with open(RESULTS_JSON, 'w') as jf:
@@ -526,6 +560,23 @@ def pareto_frontier(results):
     return sorted(front)
 
 
+def ci_matrix_table(results, prefix, fmt="{:.1f}"):
+    """Matrix of `mean [lo, hi]` cells for a per-track statistic."""
+    lines = []
+    lines.append("| `rms_threshold` | " + " | ".join(f"$m = {mf}$" for mf in MIN_FRAMES_GRID) + " |")
+    lines.append("| :---: |" + " :---: |" * len(MIN_FRAMES_GRID))
+    for r in RMS_GRID:
+        cells = []
+        for mf in MIN_FRAMES_GRID:
+            c = results[(r, mf)]
+            m, lo, hi = c[f'{prefix}_mean'], c[f'{prefix}_ci_lo'], c[f'{prefix}_ci_hi']
+            cells.append("—" if np.isnan(m)
+                         else f"{fmt.format(m)} [{fmt.format(lo)}, {fmt.format(hi)}]")
+        lines.append(f"| `{r}` | " + " | ".join(cells) + " |")
+    lines.append("")
+    return lines
+
+
 def matrix_table(results, field, fmt):
     lines = []
     lines.append("| `rms_threshold` | " + " | ".join(f"$m = {mf}$" for mf in MIN_FRAMES_GRID) + " |")
@@ -566,10 +617,18 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
                  f"{len(tracks) * len(RMS_GRID) * len(MIN_FRAMES_GRID)}. The grid is exact, "
                  "not approximated.")
     lines.append("")
-    lines.append(f"**Track subset.** The sweep used the same deterministic subset as the "
-                 f"slope/`switch_prob` ablation: the first {TRACKS_PER_INSTRUMENT} tracks of each "
-                 f"instrument in sorted path order ({len(tracks)} selected, {n_processed} yielding "
-                 "parsable MIDI). Results are therefore directly comparable between the two studies.")
+    counts = instrument_counts(tracks)
+    lines.append(f"**Corpus.** The sweep covers **every** bowed-string track in the URMP corpus — "
+                 f"{len(tracks)} stems "
+                 f"({', '.join(f'{n} {inst.lower()}' for inst, n in sorted(counts.items()))}), "
+                 f"{n_processed} of which yielded a strictly resolvable MIDI part — the same set "
+                 "the slope/`switch_prob` ablation uses, so the two studies are directly "
+                 "comparable. There is no track subset and therefore no sampling choice to justify.")
+    lines.append("")
+    lines.append("Each cell is summarised two ways. The **pooled** figure treats the corpus as one "
+                 "note population; the **per-track** figure averages the track-level statistic and "
+                 "carries a 95% confidence interval, taking the track rather than the note as the "
+                 "unit of replication.")
     lines.append("")
     lines.append("**Metrics per cell:**")
     lines.append("")
@@ -601,7 +660,7 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
     lines.append("")
 
     # --- Tracks ---
-    lines.append("## Track Subset")
+    lines.append("## Corpus")
     lines.append("")
     lines.append("| # | Track | Instrument |")
     lines.append("| :---: | :--- | :---: |")
@@ -610,9 +669,29 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
     lines.append("")
 
     # --- Matrices ---
-    lines.append("## Detection Yield (%)")
+    lines.append("## Detection Yield (%), pooled over all notes")
     lines.append("")
     lines.extend(matrix_table(results, 'detection_yield', "{:.1f}"))
+
+    lines.append("## Detection Yield (%), per-track mean with 95% CI")
+    lines.append("")
+    lines.extend(ci_matrix_table(results, 'track_det_yield'))
+    any_cell = results[next(iter(results))]
+    widths = [c['track_det_yield_ci_hi'] - c['track_det_yield_ci_lo']
+              for c in results.values() if not np.isnan(c['track_det_yield_ci_lo'])]
+    det_spread = (max(c['track_det_yield_mean'] for c in results.values())
+                  - min(c['track_det_yield_mean'] for c in results.values()))
+    lines.append("> [!NOTE]")
+    lines.append(f"> Intervals are over the {any_cell['n_tracks_ci']} tracks of the corpus, not "
+                 f"over notes. The mean interval width is {np.mean(widths):.1f} pp, against a "
+                 f"{det_spread:.1f} pp spread between the best and worst cells in the grid. "
+                 + ("Every cell-to-cell difference in this study is therefore smaller than the "
+                    "between-performance spread; no ranking within the grid should be read as "
+                    "more than a tie-break."
+                    if np.mean(widths) >= det_spread else
+                    "Differences exceeding the interval width are resolvable against the "
+                    "between-performance spread; smaller ones are not."))
+    lines.append("")
 
     lines.append("## Inclusion Yield (% of detected)")
     lines.append("")
@@ -634,9 +713,13 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
                  "optimal region. This reproduces the finding of the slope/`switch_prob` ablation.")
     lines.append("")
 
-    lines.append("## Mean $|\\text{Deviation\\_Cents}|$ (included notes)")
+    lines.append("## Mean $|\\text{Deviation\\_Cents}|$ (included notes), pooled")
     lines.append("")
     lines.extend(matrix_table(results, 'mean_dev', "{:.2f}"))
+
+    lines.append("## Mean $|\\text{Deviation\\_Cents}|$, per-track mean with 95% CI")
+    lines.append("")
+    lines.extend(ci_matrix_table(results, 'track_mean_dev', "{:.2f}"))
 
     lines.append("## 90th Percentile $|\\text{Deviation\\_Cents}|$ (included notes)")
     lines.append("")
@@ -649,6 +732,34 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
     lines.append("## Adaptive-Floor Binding Rate (% of tracks where $\\tau_{nominal}$ is operative)")
     lines.append("")
     lines.extend(matrix_table(results, 'binding_pct', "{:.0f}"))
+
+    lines.append("## Mean Effective Threshold $\\tau_{\\text{eff}}$")
+    lines.append("")
+    lines.extend(matrix_table(results, 'mean_effective_threshold', "{:.5f}"))
+    lines.append("This is the axis the sweep actually traverses. Where the mean effective threshold "
+                 "sits above the nominal value in the row label, the adaptive floor — not the swept "
+                 "parameter — is what gated the frames, and the corresponding row of every table "
+                 "above is measuring the floor rather than `rms_threshold`.")
+    lines.append("")
+    per_rms = []
+    for r in RMS_GRID:
+        c = results[(r, MIN_FRAMES_GRID[0])]
+        per_rms.append((r, c['binding_pct'], c['mean_effective_threshold'],
+                        c['min_effective_threshold'], c['max_effective_threshold']))
+    lines.append("| Nominal $\\tau$ | Binding on | Mean $\\tau_{\\text{eff}}$ | Min $\\tau_{\\text{eff}}$ | Max $\\tau_{\\text{eff}}$ |")
+    lines.append("| :---: | :---: | :---: | :---: | :---: |")
+    for r, bind, m, lo, hi in per_rms:
+        lines.append(f"| `{r}` | {bind:.0f}% of tracks | {m:.5f} | {lo:.5f} | {hi:.5f} |")
+    lines.append("")
+    inert = [r for r, bind, *_ in per_rms if bind == 0]
+    if inert:
+        lines.append(f"The nominal threshold is **entirely inert** at "
+                     f"{', '.join(f'`{r}`' for r in inert)} — on no track in the corpus does it "
+                     "exceed twice the 10th-percentile RMS. The pipeline is deterministic, so those "
+                     "rows are not merely similar but **identical**: they all ran at the same "
+                     "adaptive floor. Reading them as a sensitivity curve for `rms_threshold` "
+                     "would be reading an axis the sweep never moved along.")
+        lines.append("")
 
     lines.append("## Duration Filter: Islands Destroyed (% of candidate islands)")
     lines.append("")
@@ -730,6 +841,10 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
                          f"$|\\text{{dev}}|$ of {d['mean_dev']:.2f} cents "
                          f"({d['included']} included notes) — "
                          f"{'inside' if default_key in optimal else 'outside'} the optimal region. "
+                         f"Per track that is a detection yield of "
+                         f"{d['track_det_yield_mean']:.1f}% "
+                         f"(95% CI [{d['track_det_yield_ci_lo']:.1f}, "
+                         f"{d['track_det_yield_ci_hi']:.1f}]) over {d['n_tracks_ci']} tracks. "
                          f"The nominal RMS threshold is binding on "
                          f"{d['binding_pct']:.0f}% of tracks (mean effective threshold "
                          f"{d['mean_effective_threshold']:.5f}).")

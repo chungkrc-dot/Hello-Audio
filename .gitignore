@@ -6,6 +6,15 @@ dataset (Strings only)/
 tests/outputs/*
 !tests/outputs/certification_reports/
 
+# The batch CSVs are small and are tracked: the manual's Appendix A tables are
+# rendered from appendix_a_results.csv, test_no_corpus_stem_triggers_the_warning
+# reads it, and appendix_a_results_sigma1.csv is the only surviving record of the
+# Sigma-1 configuration that Appendix D compares against. The per-note
+# diagnostics JSONs beside them are large and stay ignored.
+!tests/outputs/batch_results/
+tests/outputs/batch_results/*
+!tests/outputs/batch_results/*.csv
+
 # Scratch / working material
 scratch/
 appendix_a_draft.md

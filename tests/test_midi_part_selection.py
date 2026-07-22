@@ -185,11 +185,8 @@ def test_no_corpus_stem_triggers_the_warning():
     if not os.path.exists(csv_path):
         pytest.skip("batch results not present")
     import csv as _csv
-    excluded = ("_18_", "_20_", "_25_", "_27_", "_35_", "_37_", "_39_")
     with open(csv_path) as fh:
         for row in _csv.DictReader(fh):
-            if any(d in row["Filename"] for d in excluded):
-                continue
             for engine in ("pYIN", "REAPER"):
                 yield_pct = float(row[f"Det_Yield_{engine}"])
                 assert low_detection_yield_warning(yield_pct, engine) is None, (

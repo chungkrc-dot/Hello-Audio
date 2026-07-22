@@ -6,11 +6,16 @@ Justifies the two non-default Engine Optimal Default parameters:
   - max_pitch_slope = 0.50 semitones/frame  (librosa/pYIN has no such filter)
   - switch_prob     = 0.005                 (librosa default is 0.01)
 
-A full factorial grid of (max_pitch_slope x switch_prob) is swept over a
-deterministic subset of URMP bowed-string tracks. For each cell the script
-reports detection yield, inclusion yield, and the median/mean
-|Deviation_Cents| of included notes, then identifies the parameter region
-that maximises detection yield while holding median deviation low.
+A full factorial grid of (max_pitch_slope x switch_prob) is swept over every
+bowed-string track in the URMP corpus. For each cell the script reports
+detection yield, inclusion yield, and the median/mean |Deviation_Cents| of
+included notes, then identifies the parameter region that maximises detection
+yield while holding median deviation low.
+
+Because the sweep covers the whole corpus rather than a sample of it, each
+cell's detection yield is also reported as a per-track mean with a 95%
+confidence interval, so a difference between two cells can be read against the
+between-track spread instead of being taken as a bare point estimate.
 
 Because `switch_prob` is consumed inside `librosa.pyin()` but
 `max_pitch_slope` is applied downstream in `analyze_intonation()` /
@@ -39,7 +44,7 @@ sys.path.insert(0, PROJECT_ROOT)
 import librosa
 
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
-from src.midi_parser import parse_midi_with_timing
+from src.midi_parser import load_part_notes, MidiTrackError
 from src.midi_alignment import process_dtw_alignment, calculate_dtw_metrics, is_note_excluded
 
 REPORT_PATH = os.path.join(SCRIPT_DIR, 'slope_switchprob_report.md')
@@ -75,9 +80,6 @@ INST_MAP = {"vn": "Violin", "va": "Viola", "vc": "Cello"}
 SLOPE_DISABLED = 999.0
 SLOPE_GRID = [0.10, 0.25, 0.50, 0.75, 1.00, SLOPE_DISABLED]
 SWITCH_PROB_GRID = [0.001, 0.005, 0.01, 0.02, 0.05]
-
-# Deterministic subset: first N tracks per instrument (sorted by path).
-TRACKS_PER_INSTRUMENT = 5
 
 # Reference tuning for all analysis.
 REFERENCE_PITCH_HZ = 440.0
@@ -181,31 +183,39 @@ def discover_tracks(dataset_dir):
     return tracks
 
 
-def select_subset(tracks, per_instrument):
-    """First `per_instrument` tracks of each instrument, in sorted path order."""
-    subset = []
-    for inst in ["Violin", "Viola", "Cello"]:
-        inst_tracks = [t for t in tracks if t['instrument'] == inst]
-        if not inst_tracks:
-            print(f"  [!] No {inst} tracks available in dataset")
-            continue
-        if len(inst_tracks) < per_instrument:
-            print(f"  [!] Only {len(inst_tracks)} {inst} tracks available "
-                  f"(requested {per_instrument})")
-        subset.extend(inst_tracks[:per_instrument])
-    return subset
+def instrument_counts(tracks):
+    counts = {}
+    for t in tracks:
+        counts[t['instrument']] = counts.get(t['instrument'], 0) + 1
+    return counts
 
 
 def load_midi_notes(midi_path, target_track):
-    with open(midi_path, 'rb') as f:
-        midi_notes = parse_midi_with_timing(f, target_track=target_track)
-        if not midi_notes:
-            f.seek(0)
-            midi_notes = parse_midi_with_timing(f, target_track=0)
-        if not midi_notes:
-            f.seek(0)
-            midi_notes = parse_midi_with_timing(f, target_track=1)
+    """Strictly resolve one part; raises MidiTrackError rather than guessing."""
+    midi_notes, _ = load_part_notes(midi_path, part_index=target_track)
     return midi_notes
+
+
+# z for a two-sided 95% interval.
+Z_95 = 1.96
+
+
+def mean_ci(values):
+    """
+    Mean of a per-track statistic with a 95% normal-approximation CI on the mean.
+
+    The unit of replication is the track, not the note: notes within a track are
+    not independent draws, so a note-level interval would be far too narrow.
+    """
+    arr = np.asarray([v for v in values if not np.isnan(v)], dtype=float)
+    n = arr.size
+    if n == 0:
+        return float('nan'), float('nan'), float('nan'), 0
+    mean = float(np.mean(arr))
+    if n < 2:
+        return mean, mean, mean, n
+    half = Z_95 * float(np.std(arr, ddof=1)) / np.sqrt(n)
+    return mean, mean - half, mean + half, n
 
 
 def main():
@@ -221,21 +231,23 @@ def main():
         print(f"Error: Dataset not found at {dataset_dir}")
         sys.exit(1)
 
-    all_tracks = discover_tracks(dataset_dir)
-    tracks = select_subset(all_tracks, TRACKS_PER_INSTRUMENT)
+    tracks = discover_tracks(dataset_dir)
 
-    print(f"\n[INFO] Found {len(all_tracks)} string tracks; "
-          f"using deterministic subset of {len(tracks)} "
-          f"(first {TRACKS_PER_INSTRUMENT} per instrument).\n")
+    counts = instrument_counts(tracks)
+    print(f"\n[INFO] Sweeping the full corpus: {len(tracks)} string tracks "
+          f"({', '.join(f'{n} {inst.lower()}' for inst, n in sorted(counts.items()))}).\n")
 
     if not tracks:
         print("No tracks found. Exiting.")
         sys.exit(1)
 
-    # cells[(slope, switch_prob)] -> accumulators
+    # cells[(slope, switch_prob)] -> accumulators. `track_det_yields` /
+    # `track_mean_devs` hold one value per track so the corpus-level figures can
+    # carry a confidence interval rather than standing as bare point estimates.
     cells = {
         (s, sp): {'total_midi': 0, 'detected': 0, 'included': 0, 'abs_devs': [],
-                  'slope_rejected': 0, 'slope_transitions': 0}
+                  'slope_rejected': 0, 'slope_transitions': 0,
+                  'track_det_yields': [], 'track_mean_devs': []}
         for s in SLOPE_GRID for sp in SWITCH_PROB_GRID
     }
 
@@ -246,7 +258,11 @@ def main():
         instrument = t['instrument']
         print(f"[{i}/{len(tracks)}] {stem} ({instrument})", flush=True)
 
-        midi_notes = load_midi_notes(t['midi_path'], t['target_track'])
+        try:
+            midi_notes = load_midi_notes(t['midi_path'], t['target_track'])
+        except MidiTrackError as exc:
+            print(f"  [!] {exc}")
+            continue
         if not midi_notes:
             print(f"  [!] No MIDI notes found, skipping")
             continue
@@ -286,6 +302,9 @@ def main():
                 c['abs_devs'].extend(abs_devs)
                 c['slope_rejected'] += n_rej
                 c['slope_transitions'] += n_trans
+                c['track_det_yields'].append(detected / total_midi * 100)
+                c['track_mean_devs'].append(float(np.mean(abs_devs)) if abs_devs
+                                            else float('nan'))
 
                 row.append(f"{slope_label(slope)}:{detected / total_midi * 100:.0f}%")
                 del metrics
@@ -303,7 +322,16 @@ def main():
     results = {}
     for key, c in cells.items():
         devs = np.array(c['abs_devs'])
+        det_mean, det_lo, det_hi, n_tracks = mean_ci(c['track_det_yields'])
+        dev_mean, dev_lo, dev_hi, _ = mean_ci(c['track_mean_devs'])
         results[key] = {
+            'n_tracks': n_tracks,
+            'track_det_yield_mean': det_mean,
+            'track_det_yield_ci_lo': det_lo,
+            'track_det_yield_ci_hi': det_hi,
+            'track_mean_dev_mean': dev_mean,
+            'track_mean_dev_ci_lo': dev_lo,
+            'track_mean_dev_ci_hi': dev_hi,
             'total_midi': c['total_midi'],
             'detected': c['detected'],
             'included': c['included'],
@@ -330,6 +358,11 @@ def main():
     print("DETECTION YIELD (% of MIDI notes with non-NaN deviation)")
     print("=" * 60)
     print_matrix(results, 'detection_yield', "{:.1f}%")
+
+    print("\n" + "=" * 60)
+    print("DETECTION YIELD, per-track mean (95% CIs are in the report)")
+    print("=" * 60)
+    print_matrix(results, 'track_det_yield_mean', "{:.1f}%")
 
     print("\n" + "=" * 60)
     print("INCLUSION YIELD (% of detected notes passing is_note_excluded)")
@@ -471,6 +504,25 @@ def matrix_table(results, field, fmt):
     return lines
 
 
+def ci_matrix_table(results, prefix, fmt="{:.1f}"):
+    """Matrix of `mean [lo, hi]` cells for a per-track statistic."""
+    lines = []
+    lines.append("| `max_pitch_slope` | " + " | ".join(f"$\\beta = {sp}$" for sp in SWITCH_PROB_GRID) + " |")
+    lines.append("| :---: |" + " :---: |" * len(SWITCH_PROB_GRID))
+    for slope in SLOPE_GRID:
+        cells = []
+        for sp in SWITCH_PROB_GRID:
+            r = results[(slope, sp)]
+            m, lo, hi = r[f'{prefix}_mean'], r[f'{prefix}_ci_lo'], r[f'{prefix}_ci_hi']
+            cells.append("—" if np.isnan(m)
+                         else f"{fmt.format(m)} [{fmt.format(lo)}, {fmt.format(hi)}]")
+        label = slope_label(slope)
+        label = "disabled" if label == "disabled" else f"`{label}`"
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+    lines.append("")
+    return lines
+
+
 def generate_report(results, optimal, frontier, tracks, n_processed):
     lines = []
     lines.append("# Slope Filter & Switch Probability Ablation Study")
@@ -494,10 +546,20 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
                  "(track, `switch_prob`) pair and reused across all slope values — the grid is "
                  "therefore exact, not approximated.")
     lines.append("")
-    lines.append(f"**Track subset.** To keep runtime tractable the sweep used a deterministic "
-                 f"subset: the first {TRACKS_PER_INSTRUMENT} tracks of each instrument in sorted "
-                 f"path order ({len(tracks)} selected, {n_processed} yielding parsable MIDI). "
-                 "Selection is fixed rather than random so the study is reproducible.")
+    counts = instrument_counts(tracks)
+    lines.append(f"**Corpus.** The sweep covers **every** bowed-string track in the URMP corpus — "
+                 f"{len(tracks)} stems "
+                 f"({', '.join(f'{n} {inst.lower()}' for inst, n in sorted(counts.items()))}), "
+                 f"{n_processed} of which yielded a strictly resolvable MIDI part. There is no "
+                 "track subset and therefore no sampling choice to justify.")
+    lines.append("")
+    lines.append("Each cell is summarised two ways. The **pooled** figure treats the corpus as one "
+                 "note population; the **per-track** figure averages the track-level statistic and "
+                 "carries a 95% confidence interval, taking the track rather than the note as the "
+                 "unit of replication. The two answer different questions — the pooled figure "
+                 "weights long tracks more heavily, the per-track figure weights every performance "
+                 "equally — and the interval on the latter is what tells you whether a difference "
+                 "between two cells is larger than the spread between performances.")
     lines.append("")
     lines.append("**Metrics per cell:**")
     lines.append("")
@@ -515,7 +577,7 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
     lines.append("")
 
     # --- Tracks ---
-    lines.append("## Track Subset")
+    lines.append("## Corpus")
     lines.append("")
     lines.append("| # | Track | Instrument |")
     lines.append("| :---: | :--- | :---: |")
@@ -524,9 +586,30 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
     lines.append("")
 
     # --- Matrices ---
-    lines.append("## Detection Yield (%)")
+    lines.append("## Detection Yield (%), pooled over all notes")
     lines.append("")
     lines.extend(matrix_table(results, 'detection_yield', "{:.1f}"))
+
+    lines.append("## Detection Yield (%), per-track mean with 95% CI")
+    lines.append("")
+    lines.extend(ci_matrix_table(results, 'track_det_yield'))
+    any_cell = results[next(iter(results))]
+    widths = [r['track_det_yield_ci_hi'] - r['track_det_yield_ci_lo']
+              for r in results.values() if not np.isnan(r['track_det_yield_ci_lo'])]
+    det_spread = (max(r['track_det_yield_mean'] for r in results.values())
+                  - min(r['track_det_yield_mean'] for r in results.values()))
+    lines.append("> [!NOTE]")
+    lines.append(f"> Intervals are over the {any_cell['n_tracks']} tracks of the corpus, not over "
+                 f"notes. The mean interval width is {np.mean(widths):.1f} pp, against a "
+                 f"{det_spread:.1f} pp spread between the best and worst cells in the grid. "
+                 + ("Every cell-to-cell difference in this study is therefore smaller than the "
+                    "between-performance spread: the parameter choice moves detection yield less "
+                    "than the choice of track does, and no ranking within the grid should be read "
+                    "as more than a tie-break."
+                    if np.mean(widths) >= det_spread else
+                    "Differences exceeding the interval width are resolvable against the "
+                    "between-performance spread; smaller ones are not."))
+    lines.append("")
 
     lines.append("## Inclusion Yield (% of detected)")
     lines.append("")
@@ -548,9 +631,13 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
                  "optimal region.")
     lines.append("")
 
-    lines.append("## Mean $|\\text{Deviation\\_Cents}|$ (included notes)")
+    lines.append("## Mean $|\\text{Deviation\\_Cents}|$ (included notes), pooled")
     lines.append("")
     lines.extend(matrix_table(results, 'mean_dev', "{:.2f}"))
+
+    lines.append("## Mean $|\\text{Deviation\\_Cents}|$, per-track mean with 95% CI")
+    lines.append("")
+    lines.extend(ci_matrix_table(results, 'track_mean_dev', "{:.2f}"))
 
     lines.append("## 90th Percentile $|\\text{Deviation\\_Cents}|$ (included notes)")
     lines.append("")
@@ -632,7 +719,14 @@ def generate_report(results, optimal, frontier, tracks, n_processed):
                          f"{d['inclusion_yield']:.1f}% inclusion yield, and a mean "
                          f"$|\\text{{dev}}|$ of {d['mean_dev']:.2f} cents "
                          f"({d['included']} included notes) — "
-                         f"{'inside' if default_key in optimal else 'outside'} the optimal region.")
+                         f"{'inside' if default_key in optimal else 'outside'} the optimal region. "
+                         f"Per track that is a detection yield of "
+                         f"{d['track_det_yield_mean']:.1f}% "
+                         f"(95% CI [{d['track_det_yield_ci_lo']:.1f}, "
+                         f"{d['track_det_yield_ci_hi']:.1f}]) over {d['n_tracks']} tracks, and a "
+                         f"mean $|\\text{{dev}}|$ of {d['track_mean_dev_mean']:.2f} c "
+                         f"(95% CI [{d['track_mean_dev_ci_lo']:.2f}, "
+                         f"{d['track_mean_dev_ci_hi']:.2f}]).")
             lines.append("")
             lb = results.get(librosa_key)
             if lb:
