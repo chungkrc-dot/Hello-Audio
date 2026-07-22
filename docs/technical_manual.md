@@ -1,13 +1,13 @@
 # Hello-Audio: Comparative Intonation and Amplitude Analysis Engine
-## Technical Manual & Algorithmic Foundations
+## Technical Manual and Algorithmic Foundations
 *A publication-grade guide to the digital signal processing, alignment, and filtering components of Hello-Audio.*
 
 ---
 
-## 1. Executive Summary & System Architecture
+## 1. Executive Summary and System Architecture
 
 > [!WARNING]
-> **Dataset & Instrument Caveat:** Hello-Audio is primarily designed, parameterized, and tested using the relevant instrument samples from the URMP dataset. As such, the application in its current state is strictly validated for **Violin, Viola, and Cello**. It should not be used to analyze other instruments without further calibration.
+> **Dataset & Instrument Caveat:** Hello-Audio is primarily designed, parameterized, and tested using the relevant instrument samples from the URMP dataset (Li et al., 2019). As such, the application in its current state is strictly validated for **Violin, Viola, and Cello**. It should not be used to analyze other instruments without further calibration.
 
 The **Hello-Audio** application is a comparative analysis engine designed to evaluate the physical execution of musical performances on string instruments. It evaluates performance across two fundamental dimensions: **amplitude (intensity)** and **intonation (frequency deviation)**. The system is engineered to isolate intentional, steady-state notes while rejecting mechanical noise, transient attacks, bow changes, glissandos, and room reverberation.
 
@@ -19,13 +19,13 @@ The processing flow operates under two modes:
 
 ```mermaid
 graph TD
-    A[Raw Audio Recording] --> B{Pitch Extraction Engine}
-    B -->|Mode 1| B2[pYIN: HMM Analysis]
-    B -->|Mode 2| B3[REAPER: Epoch Tracking]
+    A[Raw Audio Recording] --> B{"Pitch Extraction Engine"}
+    B -->|Mode 1| B2["pYIN: HMM Analysis"]
+    B -->|Mode 2| B3["REAPER: Epoch Tracking"]
     
     A --> C[RMS Energy Calculation]
     
-    subgraph Signal Bounding & Bins
+    subgraph SB["Signal Bounding and Bins"]
         B1[Instrument Range Bounding] --> B
     end
 
@@ -33,7 +33,7 @@ graph TD
     B3 --> D
     C --> D
     
-    subgraph Threshold Filters
+    subgraph TF["Threshold Filters"]
         D1[RMS Amplitude Threshold] --> D
         D2[Pitch Slope Derivative Filter] --> D
     end
@@ -41,22 +41,46 @@ graph TD
     D --> E[Sustain Duration Filter]
     E --> F[Isolated Note Islands]
     
-    F --> G{MIDI File Provided?}
+    F --> G{"MIDI File Provided?"}
     
     G -- No --> H[Legacy Engine: Locked Target Rule]
     H --> H1[Compare to Nearest Semitone Target]
     H1 --> K[Legacy Intonation Results]
     
     G -- Yes --> I[DTW Alignment Engine]
-    I --> I1[Chroma-CQT Feature Map]
+    I --> I1["Chroma-CQT Feature Map"]
     I1 --> I2[Dynamic Time Warping Cost Path]
     I2 --> J[Octave Folding Correction]
     J --> J1[Note-by-Note Score Mapping]
     J1 --> L[DTW Metrics Comparison]
     
-    C --> M[A-Weighting Loudness dBA]
+    C --> M["A-Weighting Loudness dBA"]
     M --> N[Global Amplitude Summary]
 ```
+
+### Document Structure
+
+Sections 1–8 specify the pipeline in processing order, each presenting the mathematical formulation, a conceptual reading, and the justification for any parameter the section introduces. Section 9 consolidates every user-controlled parameter and the statistics the application reports. Section 10 states the validated scope. Section 11 is the reference list.
+
+The appendices carry the empirical evidence and are organized by what they validate rather than by the order in which they were produced:
+
+| Appendix | Subject | Material | Establishes |
+| :--- | :--- | :--- | :--- |
+| **A** | Batch performance, REAPER vs. pYIN | 58 URMP stems (superseded; 41 under protocol) | Macro detection and inclusion yield |
+| **B** | Microtonal resolution under induced pitch shift | K515 quintet | The pYIN lattice; the Dual-Engine Architecture |
+| **C** | Amplitude engine validation | Synthetic sines | A-weighting and dBFS correctness |
+| **D** | DTW step pattern, $\Sigma_1 \rightarrow \Sigma_2$ | K515 quintet | Yield gain from the restricted step set |
+| **E** | Synthetic pitch accuracy | Synthetic tones | Bias, precision, linearity, timbre robustness |
+| **F** | Inter-engine agreement | 58 URMP stems (superseded) | Real-audio convergence of the two engines |
+| **G** | Voicing confidence sensitivity | Synthetic tones | Robustness to `confidence_threshold` |
+| **H** | Parameter sensitivity I | 15 URMP stems (12 unique; superseded) | Robustness to $\theta_{slope}$ and $\beta$ |
+| **I** | Parameter sensitivity II | 15 URMP stems (12 unique; superseded) | Robustness to $\theta_{static}$ and $\theta_{sustain}$ |
+| **J** | Distributional statistics | 15 URMP stems (12 unique; superseded) | Non-normality and the quantization floor |
+| **K** | Perceptual resolution | Appendix E figures | Sufficient resolution; the untested gap |
+
+Appendices E–J are read as a single metrological argument: E and G characterize the instrument on signals whose truth is known exactly, F and H–J characterize it on real performance material, and J determines which summary statistics the instrument's output can legitimately support.
+
+Appendix K stands apart from that argument. Every appendix before it validates the engine against something the engine's own designers specified — a synthesized tone of known frequency, a MIDI score, or a second configuration of the same pipeline. None establishes that the quantity being measured so carefully corresponds to what a trained musician hears. Appendix K states what the existing evidence does settle about that question, and marks clearly what it does not.
 
 ### Conceptual Overview
 > [!TIP]
@@ -68,7 +92,7 @@ graph TD
 
 ---
 
-## 2. Input Bounding & Frequency Limits
+## 2. Input Bounding and Frequency Limits
 
 ### Mathematical Formulation
 To prevent the pitch tracking algorithm from wandering into spectral regions containing only background hum or mechanical clicks, a bandpass search boundary is established. In digital pitch tracking, restricting the search range for the fundamental frequency ($f_0$) is mathematically equivalent to limiting the search space of the pitch lag parameter $\tau$ (measured in samples) during autocorrelation:
@@ -127,11 +151,11 @@ This probabilistic model provides algorithmic inertia. It assumes continuity in 
 
 #### Justification of the Engine Optimal Default ($\beta = 0.005$)
 
-Mauch & Dixon (2014) specify the voicing transition distribution of the pYIN HMM in their Equation (7) as
+Mauch and Dixon (2014) specify the voicing transition distribution of the pYIN HMM in their Equation (7) as
 
 $$p_v = P(v_t \mid v_{t-1}) = \begin{cases} 0.99, & \text{if no change} \\ 0.01, & \text{otherwise} \end{cases}$$
 
-This $0.01$ is inherited verbatim as the `switch_prob` default in `librosa.pyin()`, where it is applied as a two-state self-transition loop (`sequence.transition_loop(2, 1 - switch_prob)`). The value was tuned by the original authors against a corpus of **synthesised singing voice** derived from the RWC popular-music database — a source characterised by frequent phonation onsets, consonant interruptions and breath-group boundaries, all of which reward a comparatively permissive voiced $\leftrightarrow$ unvoiced transition.
+This $0.01$ is inherited verbatim as the `switch_prob` default in `librosa.pyin()`, where it is applied as a two-state self-transition loop (`sequence.transition_loop(2, 1 - switch_prob)`). The value was tuned by the original authors against a corpus of **synthesized singing voice** derived from the RWC popular-music database — a source characterized by frequent phonation onsets, consonant interruptions and breath-group boundaries, all of which reward a comparatively permissive voiced $\leftrightarrow$ unvoiced transition.
 
 Sustained bowed-string tone is the opposite regime. Excitation is continuous for the length of a bow stroke, and the acoustically relevant discontinuities (string crossings, bow changes, détaché articulation) are an order of magnitude rarer than syllabic boundaries in sung text. Halving $\beta$ to $0.005$ raises the self-transition probability from $0.99$ to $0.995$, doubling the log-odds penalty the Viterbi decode must overcome before it will break a voiced run:
 
@@ -140,7 +164,7 @@ $$\Delta \ell = \log\frac{1 - \beta}{\beta} \quad\Rightarrow\quad \Delta\ell_{0.
 The intended consequence is that a momentary drop in periodicity — a bow-hair transient, a wolf-tone beat, a brief loss of fundamental energy near a string crossing — no longer punches an unvoiced hole through the middle of a held note. Because the Sustain Duration Filter (§4C) discards islands shorter than $\theta_{sustain}$, such holes are not merely cosmetic: splitting one note into two sub-threshold fragments can delete **both** fragments from the analysis.
 
 > [!IMPORTANT]
-> The ablation reported in **Appendix E — Slope Filter & Switch Probability Ablation** does **not** show that $\beta = 0.005$ outperforms the librosa default. Across a 50-fold sweep ($\beta \in [0.001, 0.05]$) every reported metric is effectively flat, and what small monotone trend exists in detection yield runs *against* the argument above. The defensible claim is therefore one of **robustness, not optimality**: the intonation metric is insensitive to $\beta$ over two orders of magnitude, so this parameter cannot be a confound in any result in this manual. $\beta = 0.005$ is retained because it is the principled setting for continuously-excited bowed tone and because it is demonstrably harmless — not because the data select it.
+> The ablation reported in **Appendix H** does **not** show that $\beta = 0.005$ outperforms the librosa default. Across a 50-fold sweep ($\beta \in [0.001, 0.05]$) every reported metric is effectively flat, and what small monotone trend exists in detection yield runs *against* the argument above. The defensible claim is therefore one of **robustness, not optimality**: the intonation metric is insensitive to $\beta$ over two orders of magnitude, so this parameter cannot be a confound in any result in this manual. $\beta = 0.005$ is retained because it is the principled setting for continuously-excited bowed tone and because it is demonstrably harmless — not because the data select it.
 
 > [!NOTE]
 > $\beta$ governs **voicing** transitions only. Continuity of the *pitch* trajectory is enforced separately by the triangular pitch-transition window of Equation (8), discussed in §4B.
@@ -181,21 +205,21 @@ To understand the efficacy of REAPER on low-register instruments, consider a cel
 
 ```mermaid
 graph LR
-    subgraph Helmholtz Motion (Cello String)
+    subgraph HM["Helmholtz Motion — Cello String"]
     A1[Bow Grabs String] --> B1[String Tension Builds]
-    B1 --> C1((Slip: Massive Energy Impulse))
+    B1 --> C1(("Slip: Massive Energy Impulse"))
     C1 -.-> D1[15ms Period]
     D1 -.-> A1
     end
     
-    subgraph Glottal Cycle (Human Speech)
+    subgraph GC["Glottal Cycle — Human Speech"]
     A2[Air Forces Cords Open] --> B2[Cords Snap Shut]
-    B2 --> C2((GCI: Massive Energy Impulse))
+    B2 --> C2(("GCI: Massive Energy Impulse"))
     C2 -.-> D2[15ms Period]
     D2 -.-> A2
     end
     
-    C1 === E[REAPER detects 'Epoch' impulse perfectly]
+    C1 === E["REAPER detects epoch impulse"]
     C2 === E
 ```
 
@@ -205,7 +229,7 @@ graph LR
 
 #### Documented Limitations on Synthetic Signals
 
-Synthetic validation testing (using mathematically pure sine waves and harmonically rich sawtooth/square waves at instrument-matched frequencies) revealed three distinct classes of failure specific to REAPER that are not observed with pYIN. These are documented here as known architectural properties, not implementation bugs, and provide the empirical rationale for the Dual-Engine Architecture described in Appendix B.
+Synthetic validation testing (using mathematically pure sine waves and harmonically rich sawtooth/square waves at instrument-matched frequencies) revealed three distinct classes of failure specific to REAPER that are not observed with pYIN. These are documented here as known architectural properties, not implementation bugs, and provide the empirical rationale for the Dual-Engine Architecture documented in Appendix B.
 
 **Class 1: Low-Frequency Epoch Dropouts (NaN)**
 REAPER's epoch tracker exhibits highly fragmented or silent output on pure sine waves in the low-to-mid register (below ~400 Hz). While it successfully tracks certain isolated frequencies (e.g., 113.1 Hz, 332.1 Hz), it produces NaN (no pitch detected) for the majority of frequencies in this range. This failure pattern is completely deterministic: the same frequencies fail across all test phase and duration conditions. Critically, when given harmonically rich sawtooth waves at these exact failing frequencies, REAPER tracks them perfectly — confirming the failure is driven by the absence of a rich harmonic series to anchor epoch detection, not by any frequency cutoff. In practice on real acoustic string instruments (which are inherently harmonically rich), this failure class is largely absent.
@@ -214,7 +238,7 @@ REAPER's epoch tracker exhibits highly fragmented or silent output on pure sine 
 At certain mid-to-high frequencies (e.g., 440 Hz, 475 Hz, 1396 Hz, 1671 Hz, 2000 Hz sine), the absence of harmonics causes the epoch tracker to lock onto phantom autocorrelation peaks at exactly $\frac{1}{2}$ or $\frac{1}{10}$ the true fundamental, producing tracked frequencies roughly 1200 cents (one octave) or 2400 cents below the target.
 
 **Class 3: High-Frequency 16 kHz Quantization Grid**
-REAPER's Python wrapper (`pyreaper`) operates at a hard 16 kHz internal sample rate and lacks sub-sample parabolic interpolation for period estimation. As frequency increases, the period length in samples $N$ decreases, and the representable frequencies become constrained to the discrete grid $f = 16000 / N$. This produces exponentially increasing pitch quantization error at high frequencies, observed at 397 Hz, 440 Hz, 681 Hz, 815 Hz, 975 Hz, and above.
+`extract_pitch_and_rms()` loads audio at 16 kHz for the REAPER path, because the algorithm is tuned for that rate, and the `pyreaper` binding performs no sub-sample parabolic interpolation of the estimated period. As frequency increases, the period length in samples $N$ decreases, and the representable frequencies become constrained to the discrete grid $f = 16000 / N$. This produces steeply increasing pitch quantization error at high frequencies, observed at 397 Hz, 440 Hz, 681 Hz, 815 Hz, 975 Hz, and above. Note that this grid constrains the *pitch values* REAPER can report; the frame timeline is separately resampled onto a 44.1 kHz, $H = 512$ grid so that both engines share one masking geometry.
 
 | Failure Class | Affected Register | Sine | Sawtooth | Impact on Real Audio |
 | :--- | :--- | :---: | :---: | :--- |
@@ -227,11 +251,11 @@ REAPER's Python wrapper (`pyreaper`) operates at a hard 16 kHz internal sample r
 
 ---
 
-## 4. Signal Filtering & Note Isolation
+## 4. Signal Filtering and Note Isolation
 
 Once the raw pitch ($f_0$) and amplitude (RMS) are extracted, they are processed through three filters to isolate intentional, stable notes.
 
-### A. RMS Amplitude Threshold & Adaptive Noise Gating
+### A. RMS Amplitude Threshold and Adaptive Noise Gating
 #### Rationale
 A static RMS threshold ($\theta_{static}$) can fail across different recording sessions due to varying microphone gains, distance from the microphone, or ambient room environments. For example, a quiet recording might have its intentional notes discarded by a high static threshold, while a loud recording might allow background HVAC hiss to pass a low static threshold. 
 
@@ -254,11 +278,11 @@ $$x_{rms} > \theta_{effective}$$
 #### Process Flow Diagram
 ```mermaid
 graph TD
-    A[Raw RMS Array] --> B{Adaptive Toggle Enabled?}
-    B -- Yes --> C[Calculate 10th Percentile: Noise Floor]
-    C --> D[Multiply by beta 2.0]
+    A[Raw RMS Array] --> B{"Adaptive Toggle Enabled?"}
+    B -- Yes --> C["Calculate 10th Percentile: Noise Floor"]
+    C --> D["Multiply by beta = 2.0"]
     D --> E[Compare with Static Threshold]
-    E --> F{Select Maximum}
+    E --> F{"Select Maximum"}
     B -- No --> G[Use Static Threshold]
     G --> F
     F --> H[Effective RMS Threshold]
@@ -301,11 +325,11 @@ $$\dot{p}_{\max} = \theta_{slope} \cdot \frac{f_s}{H}, \qquad H = 512$$
 | 44.1 kHz | 11.61 ms | 86.13 fps | 43.1 st/s |
 | 22.05 kHz | 23.22 ms | 43.07 fps | 21.5 st/s |
 
-**Upper bound — vibrato must survive.** Modelling vibrato as a sinusoidal modulation of extent $W$ cents peak-to-peak at rate $f_{vib}$, the peak instantaneous slope is
+**Upper bound — vibrato must survive.** Modeling vibrato as a sinusoidal modulation of extent $W$ cents peak-to-peak at rate $f_{vib}$, the peak instantaneous slope is
 
 $$\dot{p}_{peak} = 2\pi f_{vib} \cdot \frac{W}{200} \quad \text{semitones/second}$$
 
-Allen, Geringer & MacLeod (2009) measured artist-level violin vibrato at $f_{vib} \approx 5.7$ Hz with $W \approx 40$ cents in first position, rising to $f_{vib} \approx 6.3$ Hz with $W \approx 108$ cents in fifth position. The broader literature bounds string vibrato rate at 4–10 Hz.
+Allen et al. (2009) measured artist-level violin vibrato at $f_{vib} \approx 5.7$ Hz with $W \approx 40$ cents in first position, rising to $f_{vib} \approx 6.3$ Hz with $W \approx 108$ cents in fifth position. The broader literature bounds string vibrato rate at 4–10 Hz.
 
 | Case | $W$ (cents) | $f_{vib}$ (Hz) | $\dot{p}_{peak}$ (st/s) | st/frame @ 48 kHz |
 | :--- | :---: | :---: | :---: | :---: |
@@ -315,11 +339,11 @@ Allen, Geringer & MacLeod (2009) measured artist-level violin vibrato at $f_{vib
 
 $\theta_{slope} = 0.50$ clears even the worst case by a factor of $\approx 1.4$, so no vibrato cycle is truncated. A threshold of $0.25$ would begin clipping fifth-position vibrato, and $0.10$ would clip even first-position vibrato.
 
-This is the decisive argument for $0.50$, and it is **not** an argument the aggregate metrics can make on their own. The ablation in Appendix E shows that tightening $\theta_{slope}$ below $0.50$ *lowers* mean $|\text{dev}|$ — the numbers look better. They look better because the filter is deleting the outer excursions of legitimate vibrato, leaving a sample biased toward each note's pitch centre. Selecting $\theta_{slope}$ by minimising measured deviation would therefore select a threshold that systematically *understates* the performer's true pitch variance. The threshold must instead be set from the physics of the gesture being measured, and validated by confirming that yield and accuracy do not collapse there — which is what Appendix E reports.
+This is the decisive argument for $0.50$, and it is **not** an argument the aggregate metrics can make on their own. The ablation in Appendix E shows that tightening $\theta_{slope}$ below $0.50$ *lowers* mean $|\text{dev}|$ — the numbers look better. They look better because the filter is deleting the outer excursions of legitimate vibrato, leaving a sample biased toward each note's pitch center. Selecting $\theta_{slope}$ by minimizing measured deviation would therefore select a threshold that systematically *understates* the performer's true pitch variance. The threshold must instead be set from the physics of the gesture being measured, and validated by confirming that yield and accuracy do not collapse there — which is what Appendix E reports.
 
 **Lower bound — glitches must not survive.** The dominant pYIN failure mode on bowed strings is harmonic confusion, in which the tracker latches onto a partial or subharmonic. The smallest such error is an octave, $|\Delta p| = 12$ semitones in a single frame — $24\times$ the threshold. A fifth-error (third partial) is $19$ semitones. There is thus a wide, empty separation between the fastest legitimate gesture ($0.36$ st/frame) and the slowest illegitimate one ($12$ st/frame); $\theta_{slope} = 0.50$ sits near the bottom of that gap, close to the musical bound so that the filter also trims residual transition frames.
 
-**Why pYIN's own continuity model is insufficient.** Mauch & Dixon's Equation (8) constrains pitch continuity with a triangular transition window spanning 25 bins of 10 cents — **2.5 semitones per frame**. librosa generalises this as `max_transition_rate = 35.92` octaves/second, converted internally to `round(max_transition_rate * 12 * hop_length / sr)` semitones per frame:
+**Why pYIN's own continuity model is insufficient.** Mauch and Dixon's (2014) Equation (8) constrains pitch continuity with a triangular transition window spanning 25 bins of 10 cents — **2.5 semitones per frame**. librosa generalizes this as `max_transition_rate = 35.92` octaves/second, converted internally to `round(max_transition_rate * 12 * hop_length / sr)` semitones per frame:
 
 | $f_s$ | librosa internal ceiling | Ratio to $\theta_{slope} = 0.50$ |
 | :---: | :---: | :---: |
@@ -329,7 +353,7 @@ This is the decisive argument for $0.50$, and it is **not** an argument the aggr
 
 The HMM therefore permits frame-to-frame excursions of up to a perfect fourth (48 kHz) without penalty — comfortably wide enough to admit the octave errors this pipeline must reject. The slope filter is not redundant with the HMM; it is roughly an order of magnitude stricter, and it operates *after* Viterbi decoding, where the HMM's own smoothing has already committed to a trajectory.
 
-**Portamento is deliberately trimmed, not preserved.** Bowed-string portamento typically spans 2–4 semitones over 50–200 ms, i.e. 10–80 st/s (0.11–0.85 st/frame at 48 kHz). At $\theta_{slope} = 0.50$ the slower two-thirds of that range is retained and only the fastest slides (e.g. 4 semitones in under 85 ms) are trimmed. This is the intended behaviour: §5 measures intonation against a *locked target* for each note, and slide frames belong to neither the departing nor the arriving pitch. Trimming them raises accuracy without displacing the note itself, since the target is a **median** over surviving frames and is therefore robust to asymmetric truncation at the note edges.
+**Portamento is deliberately trimmed, not preserved.** Bowed-string portamento typically spans 2–4 semitones over 50–200 ms, i.e. 10–80 st/s (0.11–0.85 st/frame at 48 kHz). At $\theta_{slope} = 0.50$ the slower two-thirds of that range is retained and only the fastest slides (e.g. 4 semitones in under 85 ms) are trimmed. This is the intended behavior: §5 measures intonation against a *locked target* for each note, and slide frames belong to neither the departing nor the arriving pitch. Trimming them raises accuracy without displacing the note itself, since the target is a **median** over surviving frames and is therefore robust to asymmetric truncation at the note edges.
 
 > [!NOTE]
 > Because $\theta_{slope}$ is specified per frame while $H$ is fixed at 512 samples, the effective rate limit scales with $f_s$. At 22.05 kHz the threshold falls to 21.5 st/s, which would begin to clip wide fifth-position vibrato. The Engine Optimal Default is validated for material at 44.1 kHz and above; the URMP corpus used throughout this manual is 48 kHz.
@@ -357,7 +381,7 @@ This filter operates as a temporal smoothing mechanism. Acoustic events that are
 
 ---
 
-## 5. Intonation Scoring & The Locked Target Rule (Legacy)
+## 5. Intonation Scoring and the Locked Target Rule (Legacy Mode)
 
 ### Mathematical Formulation
 In Legacy Mode (without a MIDI score), the system must determine what note the performer intended to play. For each isolated note island, the algorithm converts the pitch track to MIDI values, extracts the median value, and rounds it to the nearest integer to define the **Locked Target Note** ($T$):
@@ -391,7 +415,7 @@ When a MIDI reference is uploaded, Hello-Audio swaps the legacy nearest-semitone
 ### Phase 1: Temporal Alignment (Finding the Map)
 **Goal:** Align the rhythm and speed of the human performance to the MIDI score, regardless of what octave the human played in.
 
-**Justification from Literature:** This methodology is formally known in Music Information Retrieval (MIR) as "Score-Informed Pitch Tracking". As detailed by Müller (2015) in the standard text *Fundamentals of Music Processing*, utilizing Dynamic Time Warping (DTW) to align a MIDI reference provides a "prior" that allows the system to identify and correct tracking errors that blind algorithms cannot resolve. Abeßer, Frieler, Dittmar, and Schuller (2014) successfully demonstrated this exact score-informed DTW methodology to accurately analyze microtonal intonation in jazz solos, separating genuine tuning deviations from raw algorithmic tracking artifacts.
+**Justification from Literature:** This methodology is formally known in Music Information Retrieval (MIR) as "Score-Informed Pitch Tracking". As detailed by Müller (2015), utilizing Dynamic Time Warping (DTW) to align a MIDI reference provides a "prior" that allows the system to identify and correct tracking errors that blind algorithms cannot resolve. Abeßer et al. (2014) demonstrated this exact score-informed DTW methodology to accurately analyze microtonal intonation in jazz solos, separating genuine tuning deviations from raw algorithmic tracking artifacts.
 
 #### A. Chroma CQT Feature Mapping
 #### Mathematical Formulation
@@ -419,7 +443,7 @@ This yields a 12-dimensional vector at each frame representing the intensity of 
 
 ---
 
-#### B. DTW Cost Matrix & Warping Path
+#### B. DTW Cost Matrix and Warping Path
 #### Mathematical Formulation
 Let the synthesized MIDI Chroma sequence be $X = (\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_N)$ and the performed audio Chroma sequence be $Y = (\mathbf{y}_1, \mathbf{y}_2, \dots, \mathbf{y}_M)$. 
 The system computes an $N \times M$ local cost matrix using the cosine distance between the Chroma vectors:
@@ -440,12 +464,12 @@ The cumulative cost matrix $D(i, j)$ is computed recursively using dynamic progr
 
 $$D(n, m) = \min \begin{cases} D(n-1, m-1) + 2 \cdot d(n, m) & \text{(diagonal)} \\ D(n-2, m-1) + d(n-1, m) + d(n, m) & \text{(vertical-leaning)} \\ D(n-1, m-2) + d(n, m-1) + d(n, m) & \text{(horizontal-leaning)} \end{cases}$$
 
-**Step Size Condition (Step Pattern):** This recursive function defines the **Step Size Condition** of the DTW algorithm. As outlined in Müller (2015, §3.2), two primary step size conditions are discussed:
+**Step Size Condition (Step Pattern):** This recursive function defines the **Step Size Condition** of the DTW algorithm. As outlined by Müller (2015, §3.2), two primary step size conditions are discussed:
 
 * **$\Sigma_1 = \{(1, 0), (0, 1), (1, 1)\}$** (Classical): Allows unlimited consecutive horizontal or vertical steps, permitting "degenerate" warping paths where a single frame in one sequence maps to an arbitrary number of consecutive frames in the other. This is the default in `librosa.sequence.dtw`.
 * **$\Sigma_2 = \{(2, 1), (1, 2), (1, 1)\}$** (Restricted): Eliminates pure horizontal and vertical steps entirely. The path must always advance in *both* sequences simultaneously, constraining the local warping slope to $[\frac{1}{2}, 2]$.
 
-This engine uses the restricted step size condition $\Sigma_2$ with multiplicative weights $(w_d, w_h, w_v) = (2, 1, 1)$, as recommended by Müller (2015) for music synchronization. The diagonal weight of $2$ counterbalances an implicit cost bias: a single diagonal step $(1,1)$ accumulates $1 \times d(n, m)$, while the equivalent two-step horizontal+vertical route accumulates $2 \times$ cost values, making diagonals artificially cheaper under uniform weighting.
+This engine uses the restricted step size condition $\Sigma_2$ with multiplicative weights $(w_d, w_h, w_v) = (2, 1, 1)$, as recommended by Müller (2015, §3.2) for music synchronization. The diagonal weight of $2$ corrects a cost bias intrinsic to $\Sigma_2$ itself: within this step set the two off-diagonal steps $(2,1)$ and $(1,2)$ each traverse **two** cells of the local cost matrix, whereas the diagonal step $(1,1)$ traverses only **one**. Under uniform weighting the diagonal would therefore accrue roughly half the local cost per unit of progress, biasing the optimal path toward the diagonal irrespective of the underlying feature similarity. Weighting the diagonal by $2$ equalizes the cost accrued per step across all three transitions, so the path is selected on chroma agreement rather than on step geometry.
 
 **Empirical Validation (K515 Quintet):** The transition from $\Sigma_1$ to $\Sigma_2$ was validated on the complete Mozart K515 String Quintet (5 tracks × 2 pitch engines = 10 runs). The restricted step pattern produced a universal improvement in detected yield (mean $+2.34$ pp across all 10 runs), with the largest gains on the Cello track ($+4.73$ pp REAPER, $+3.33$ pp pYIN) — the track previously identified as most vulnerable to cumulative DTW drift (see *Empirical Finding: Subsequence DTW Yield Collapse on K515 Cello* below). Included yield was negligibly affected (mean $-0.02$ pp), and mean deviation was essentially unchanged (mean $-0.03$ Hz). The full K515 comparison is documented in Appendix D.
 
@@ -502,7 +526,7 @@ By determining the continuous path of minimal cost, the algorithm generates the 
 
 *Note.* The isolation of intentional musical notes. The raw pYIN trace (left) contains tracking noise during periods of rest. The DTW boolean masking logic (right) preserves only the frames that successfully match the MIDI score, discarding acoustic noise.
 
-4. Finally, the **Octave Folding Logic** (detailed in Section 7) corrects any harmonic tracking artifacts.
+4. Finally, the **Octave Folding Logic** (detailed in §7) corrects any harmonic tracking artifacts.
 
 ---
 
@@ -521,6 +545,9 @@ Batch testing across the URMP dataset revealed a significant, previously undocum
 | :--- | :---: | :---: | :---: |
 | **REAPER** | 88.89% | 45.28% | **−43.61 pp** |
 | **pYIN** | 93.61% | 53.89% | **−39.72 pp** |
+
+> [!NOTE]
+> These figures come from a dedicated mode-comparison run (`tests/scripts/batch/diagnose_dtw_mode.py`, archived at `tests/outputs/batch_results/dtw_mode_comparison.csv`) rather than from the Appendix A batch, and both columns predate the $\Sigma_1 \rightarrow \Sigma_2$ step-pattern change. The pYIN Global figure ($93.61\%$) reproduces the Appendix A value for this track exactly; the REAPER Global figure ($88.89\%$) sits $1.94$ pp below Appendix A's $90.83\%$. The two runs use identical parameters, so the residual is attributable to the separate code paths, and it is small relative to the $\sim 40$ pp effect under discussion. The **magnitude of the collapse**, not the absolute yield, is the finding.
 
 However, duration alone does not appear to be a sufficient predictor of this failure. The K515 Violin 2 part (`AuSep_2_vn_44_K515`, 477 notes), from the exact same 411-second piece, showed only a negligible difference between modes (e.g., Global: 89.94% vs Subsequence: 89.69% for REAPER, a ~0.25% delta). It remains an open question what specifically makes the cello part vulnerable to this collapse—whether it is note density, specific passage content, or something unique about the chroma matching for that part.
 
@@ -548,9 +575,9 @@ Global DTW prevents this by anchoring the endpoints, constraining the maximum po
 ### Mathematical Formulation
 Pitch extraction engines can suffer from "harmonic tracking errors." This occurs when the algorithm tracks a dominant acoustic overtone instead of the fundamental frequency ($f_0$). These errors most commonly manifest as octaves (e.g., tracking the 2nd harmonic $2f_0$, which is +12 semitones), perfect fifths (e.g., the 3rd harmonic $3f_0$, +19 semitones), or major thirds (e.g., the 5th harmonic $5f_0$, +28 semitones).
 
-**Justification from Literature:** The necessity of this folding logic is grounded in established digital signal processing (DSP) research. As detailed by De Cheveigné & Kawahara (2002) in their foundational work on the YIN algorithm, autocorrelation-based pitch trackers mathematically struggle to distinguish between the true fundamental period and its integer multiples, making octave errors ($\pm12$ semitones) the most prevalent failure mode. Furthermore, Mauch & Dixon (2014) demonstrated with the development of the pYIN algorithm that musical performances—particularly those with vibrato or string transitions—can cause trackers to violently jump to octaves and fifths/twelfths (3rd harmonic) due to overlapping harmonic energy. 
+**Justification from Literature:** The necessity of this folding logic is grounded in established digital signal processing (DSP) research. As detailed by de Cheveigné and Kawahara (2002) in their foundational work on the YIN algorithm, autocorrelation-based pitch trackers mathematically struggle to distinguish between the true fundamental period and its integer multiples, making octave errors ($\pm12$ semitones) the most prevalent failure mode. Furthermore, Mauch and Dixon (2014) demonstrated with the development of the pYIN algorithm that musical performances—particularly those with vibrato or string transitions—can cause trackers to violently jump to octaves and fifths/twelfths (3rd harmonic) due to overlapping harmonic energy. 
 
-To overcome these inherent algorithmic limitations during performance assessment, this system utilizes "Pitch-Class Wrapping" (or "Octave Folding"). Molina et al. (2014) argue that penalizing a performer for a 12-semitone tracking error compromises the integrity of performance assessment software, and they validate that grading based on pitch-class accuracy is the pedagogically correct approach. This is heavily supported by vocal intonation research: both Devaney et al. (2012) and Gómez & Bonada (2013) explicitly detail post-processing heuristic steps—functionally identical to the folding gate below—that map tracked F0 data back to the expected score register prior to calculating microtonal cent-deviations. The folding logic outlined below is designed to mathematically isolate and correct these known algorithmic artifacts so that true intonation can be evaluated.
+To overcome these inherent algorithmic limitations during performance assessment, this system utilizes "Pitch-Class Wrapping" (or "Octave Folding"). Molina et al. (2014) argue that penalizing a performer for a 12-semitone tracking error compromises the integrity of performance assessment software, and they validate that grading based on pitch-class accuracy is the pedagogically correct approach. This is heavily supported by vocal intonation research: both Devaney et al. (2012) and Gómez and Bonada (2013) explicitly detail post-processing heuristic steps—functionally identical to the folding gate below—that map tracked F0 data back to the expected score register prior to calculating microtonal cent-deviations. The folding logic outlined below is designed to mathematically isolate and correct these known algorithmic artifacts so that true intonation can be evaluated.
 
 Let the raw tracked pitch in MIDI units be $p_{midi}[n]$ and the expected MIDI pitch from the DTW-aligned score be $p_{expected}[n]$. The correction algorithm executes in two distinct phases:
 
@@ -576,10 +603,15 @@ $$f_{folded}[n] = 440 \cdot 2^{\frac{p_{folded}[n] - 69}{12}}$$
 
 *Harmonic Folding Correction of Overtone Artifacts*
 
+*Panel A. pYIN output.*
+
 ![Harmonic Folding Proof (pYIN)](../tests/outputs/certification_reports/02_octave_folding_proof_graph.png)
+
+*Panel B. REAPER output.*
+
 ![Harmonic Folding Proof (REAPER)](images/reaper_octave_folding_example.png)
 
-*Note.* The algorithmic correction of a pitch tracking error. An acoustic overtone incorrectly tracked as the fundamental frequency due to strong harmonic energy is mathematically folded into the correct target register and pitch class, restoring accurate intonation analysis. The top figure demonstrates this correction on pYIN output, while the bottom figure demonstrates identical corrective behavior on REAPER output (specifically isolating a mechanical octave error).
+*Note.* Algorithmic correction of a pitch tracking error. An acoustic overtone incorrectly tracked as the fundamental frequency, owing to strong harmonic energy, is folded back into the correct target register and pitch class, restoring accurate intonation analysis. Panel A demonstrates the correction on pYIN output; Panel B demonstrates identical corrective behavior on REAPER output, isolating a mechanical octave error.
 
 #### Conceptual Overview
 Harmonic folding operates sequentially, first functioning similarly to modulo arithmetic to isolate the pitch class from its octave register, followed by targeted correction of specific harmonic intervals. This ensures intonation is evaluated strictly on microtonal tuning precision, irrespective of gross algorithmic overtone transposition errors.
@@ -594,7 +626,7 @@ Before any folding logic is applied, the algorithm checks the absolute raw devia
 ### Failure Mode (Bypass Toggle: `Enable Harmonic Folding`)
 * **When Enabled**: Both octave and specific non-octave overtone tracking errors are folded back to the correct fundamental target. The intonation deviation calculation accurately measures the performer's tuning precision.
   * **`auto_exclude` Integration (Resolved)**: An earlier design concern noted that harmonic folding could silently mask gross tracking errors by correcting them to ~0 cents before the `>100-cent auto_exclude` filter was applied, allowing them to falsely appear as perfect intonation hits. This conflict has been resolved. The pipeline now explicitly tracks a `Correction_Applied` flag and `Correction_Type` label for every frame modified by `apply_harmonic_folding`. The `is_note_excluded()` helper function uses `Correction_Applied = True` as an independent exclusion criterion, meaning any note where folding was applied is **automatically routed to the excluded bucket** regardless of its post-folding deviation magnitude. Users retain the ability to manually inspect and override individual exclusions via the UI. This ensures corrected notes are logged and auditable rather than silently absorbed into the included metrics.
-  * **Validated Behaviour (Synthetic Tests)**: Injecting a genuine +12-semitone octave error into a synthesized audio stream and processing it through the full `apply_harmonic_folding → calculate_dtw_metrics → is_note_excluded` pipeline produces: residual deviation = 20.00 cents, `Correction_Applied = True`, `Correction_Type = 'Octave'`, excluded state = `True`. An injected +19-semitone (3rd harmonic) error produces: residual = 0.00 cents, `Correction_Applied = True`, `Correction_Type = 'Octave (x2) + Perfect 5th'`, excluded state = `True`. Both confirm the gate-plus-exclusion chain operates correctly.
+  * **Validated Behavior (Synthetic Tests)**: Injecting a genuine +12-semitone octave error into a synthesized audio stream and processing it through the full `apply_harmonic_folding → calculate_dtw_metrics → is_note_excluded` pipeline produces: residual deviation = 20.00 cents, `Correction_Applied = True`, `Correction_Type = 'Octave'`, excluded state = `True`. An injected +19-semitone (3rd harmonic) error produces: residual = 0.00 cents, `Correction_Applied = True`, `Correction_Type = 'Octave (x2) + Perfect 5th'`, excluded state = `True`. Both confirm the gate-plus-exclusion chain operates correctly.
 * **When Disabled**: If a performer plays a note (e.g., A4 = $440\text{ Hz}$) but the engine tracks its octave harmonic ($880\text{ Hz}$), the system calculates the deviation relative to the target. Without folding, the deviation will be reported as $+1200$ cents. This introduces significant artificial discontinuities into the pitch analysis, skewing the overall mean deviation metric.
 
 ### Gross Error Exclusion Threshold Justification ($> 100$ Cents)
@@ -611,27 +643,22 @@ The 100-cent threshold aligns with established findings in pitch perception and 
 
 1. **Categorical pitch perception.** Larrouy-Maestri et al. (2013) demonstrated that listeners perceive pitch deviations categorically, with 100 cents (one semitone) functioning as the boundary beyond which a note is perceived as a different pitch class entirely. Their vocal intonation study used a 50-cent threshold for "in-tune" judgments but identified 100 cents as the point of categorical ambiguity — deviations beyond this are heard as wrong notes, not as out-of-tune versions of the correct note.
 
-2. **Semitone as perceptual boundary.** Sundberg (1987, *The Science of the Singing Voice*) established that the just-noticeable difference (JND) for pitch is approximately 5–10 cents for trained musicians, while the semitone (100 cents) represents the fundamental unit of melodic interval perception in Western music. Deviations within one semitone are perceived as variations in tuning quality; deviations beyond one semitone are perceived as interval errors.
+2. **Semitone as perceptual boundary.** Sundberg (1987) established that the just-noticeable difference (JND) for pitch is approximately 5–10 cents for trained musicians, while the semitone (100 cents) represents the fundamental unit of melodic interval perception in Western music. Deviations within one semitone are perceived as variations in tuning quality; deviations beyond one semitone are perceived as interval errors.
 
-3. **Performance assessment practice.** Devaney, Mandel & Fujinaga (2012) and Molina et al. (2014) both apply post-processing exclusion of gross deviations before computing intonation metrics, recognizing that extreme outliers reflect tracking failures or performance errors outside the scope of tuning-precision measurement.
+3. **Performance assessment practice.** Devaney et al. (2012) and Molina et al. (2014) both apply post-processing exclusion of gross deviations before computing intonation metrics, recognizing that extreme outliers reflect tracking failures or performance errors outside the scope of tuning-precision measurement.
 
-> **References**
->
-> - Larrouy-Maestri, P., Lévêque, Y., Schön, D., Giovanni, A., & Morsomme, D. (2013). The evaluation of singing voice accuracy: A comparison between subjective and objective methods. *Journal of Voice*, 27(2), 259.e1–259.e5.
-> - Sundberg, J. (1987). *The Science of the Singing Voice*. Northern Illinois University Press.
-> - Devaney, J., Mandel, M. I., & Fujinaga, I. (2012). A study of intonation in three-part singing using the automatic music performance analysis and comparison toolkit (AMPACT). *Proceedings of ISMIR 2012*.
-> - Molina, E., Barbancho-Perez, A. M., Tardón, L. J., & Barbancho-Perez, I. (2014). Evaluation framework for automatic singing transcription. *Proceedings of ISMIR 2014*.
+Full bibliographic entries for all four sources appear in §11.
 
 #### Empirical Validation (URMP Dataset)
 
-To confirm the threshold is well-calibrated, the pYIN engine was run through the full production pipeline on all 58 bowed-string tracks in the URMP dataset ($n = 12{,}975$ MIDI notes, $12{,}277$ detected). The script `validate_exclusion_threshold.py` implements this analysis.
+To confirm the threshold is well-calibrated, the pYIN engine was run through the full production pipeline on all 58 bowed-string tracks in the URMP dataset ($n = 12{,}975$ MIDI notes, $12{,}277$ detected). The script `tests/scripts/validation/validate_exclusion_threshold.py` implements this analysis.
 
 **Deviation distribution (detected notes):**
 
 | Statistic | Value |
 | :--- | :---: |
-| Median $|\text{dev}|$ | 10.00 cents |
-| Mean $|\text{dev}|$ | 26.61 cents |
+| Median $\|\text{dev}\|$ | 10.00 cents |
+| Mean $\|\text{dev}\|$ | 26.61 cents |
 | 90th percentile | 30.00 cents |
 | 95th percentile | 40.00 cents |
 | 99th percentile | 600.00 cents |
@@ -665,7 +692,7 @@ The exclusion rate is consistent across instruments (2–4%), with Cello slightl
 
 ---
 
-## 8. Loudness & Perceptual Weighting
+## 8. Loudness and Perceptual Weighting
 
 ### Mathematical Formulation
 To analyze performance intensity, Hello-Audio measures the Root Mean Square (RMS) energy. However, the human ear does not perceive all frequencies as equally loud. To match human perception, the system calculates both physical and perceptual intensity:
@@ -698,17 +725,26 @@ The A-weighting filter functions as a frequency-dependent transformation, attenu
 
 ---
 
-## 9. Summary of User-Controlled Parameters
+## 9. Summary of User-Controlled Parameters and Reported Statistics
 
-| Parameter | Recommended Value | Physical Meaning | Algorithmic Role |
-| :--- | :--- | :--- | :--- |
-| **Analysis Profile** | Preset / Custom | Experimental standard | Selects presets (`Rapid` vs `Slow`) to guarantee trial consistency. |
-| **Select Instrument** | Match played | Bounding filter | Adjusts the $f_{\min}$ and $f_{\max}$ search limits for the selected pitch engine. |
-| **Switch Probability** | $0.005$ | HMM stability | Penalizes rapid toggling between voiced/unvoiced states in the HMM. |
-| **RMS Threshold** | $0.01 - 0.02$ | Noise Gate | Sets the minimum signal energy required to classify a frame as active. |
-| **Sustain Duration** | $10\text{ frames} \approx 116\text{ ms}$ | Note length | Discards any isolated active blocks shorter than this threshold. |
-| **Max Pitch Slope** | $0.10\text{ semitones}$ | Derivative threshold | Discards frames where the frame-to-frame pitch jump exceeds this limit. |
-| **Reference Pitch** | $440.0\text{ Hz}$ | Concert A tuning standard | Shifts the MIDI reference grid to accommodate non-A440 tuning standards (e.g., A=441–443 Hz for European orchestras). When set to A=442 Hz, a frame measured at 442.0 Hz is correctly reported as 0.0 cents deviation from A4, rather than the +7.9 cents that A440-referenced MIDI would indicate. |
+### Engine Optimal Defaults
+
+The values below are the **Engine Optimal Defaults** — the settings selected in `render_sidebar_parameters()` when the *Engine Optimal Default* analysis profile is active, and the settings used for every empirical result reported in this manual. Each is justified in the section cited, and the sensitivity of the pipeline to each is measured in Appendices G–I.
+
+| Parameter | Engine Optimal Default | Physical meaning | Algorithmic role | Justification | Sensitivity |
+| :--- | :--- | :--- | :--- | :---: | :---: |
+| **Pitch Tracker Engine** | pYIN | Estimator family | Selects HMM-based (pYIN) or epoch-based (REAPER) $f_0$ extraction. | §3, App. B | App. F |
+| **Analysis Profile** | Engine Optimal Default | Experimental standard | Selects a named parameter set (*Engine Optimal Default*, *Rapid / Virtuosic*, *Medium / Andante*, *Slow / Legato*) to guarantee trial consistency. The tempo profiles govern Legacy-mode island logic only and are disabled once a MIDI score is uploaded. | — | — |
+| **Select Instrument** | Match instrument played | Bounding filter | Sets the $f_{\min}$ and $f_{\max}$ search limits passed to the pitch engine. | §2 | — |
+| **Reference Pitch** | $440.0\text{ Hz}$ | Concert A tuning standard | Shifts the MIDI reference grid to accommodate non-A440 tuning (e.g., A = 441–443 Hz for many European orchestras). At A = 442 Hz a frame measured at 442.0 Hz is reported as $0.0$ cents from A4 rather than the $+7.9$ cents an A440-referenced grid would indicate. | §5 | — |
+| **Switch Probability ($\beta$)** | $0.005$ | HMM voicing stability | Penalizes rapid toggling between voiced and unvoiced states in the pYIN HMM. Disabled under REAPER. | §3A | App. H |
+| **RMS Amplitude Threshold ($\theta_{static}$)** | $0.005$ | Noise gate | Sets the minimum frame energy required to classify a frame as active. Superseded by the adaptive floor $2 \cdot P_{10}(\text{RMS})$ wherever that floor is higher. | §4A | App. I |
+| **Minimum Sustain Duration ($\theta_{sustain}$)** | $2\text{ frames}$ (pYIN); $4\text{ frames}$ (REAPER) | Minimum note length | Discards contiguous active islands shorter than this threshold. At 48 kHz with $H = 512$, 2 frames $\approx 21.3\text{ ms}$. | §4C, §3B | App. I |
+| **Maximum Pitch Slope ($\theta_{slope}$)** | $0.50\text{ semitones/frame}$ | Derivative threshold | Discards frames where the frame-to-frame pitch jump exceeds this limit. | §4B | App. H |
+| **Voicing Confidence Threshold** | $0.0$ (no filtering) | Estimator confidence | Discards frames whose pYIN voicing probability falls below the threshold. Has no graded effect under REAPER, whose voicing flag is binary. | §3A | App. G |
+
+> [!NOTE]
+> The three tempo profiles (*Rapid / Virtuosic*, *Medium / Andante*, *Slow / Legato*) set $\theta_{slope} = 0.20$ and $\theta_{static} = 0.01$, varying only $\theta_{sustain}$ (1, 3 and 5 frames respectively). They are provided for Legacy-mode convenience and are **not** the configuration under which any result in this manual was produced. All reported figures use the Engine Optimal Default column above.
 
 ### Reported Deviation Statistics
 
@@ -719,66 +755,95 @@ Both the Legacy and DTW result panels report the deviation distribution in cents
 | Mean, SD, SEM | Classical moments; SD is the sample estimator ($\text{ddof} = 1$) | No | No |
 | Median, Q1, Q3, IQR, MAD | Order statistics | Yes | **Yes — severely** |
 | **10%-trimmed mean** | Mean of the sample after discarding 10% from each tail | **Yes** | **No** |
-| Skewness (G1) | Bias-corrected third standardised moment; $0$ if symmetric | No | No |
-| Excess kurtosis (G2) | Bias-corrected fourth standardised moment; $0$ for a Gaussian | No | No |
+| Skewness (G1) | Bias-corrected third standardized moment; $0$ if symmetric | No | No |
+| Excess kurtosis (G2) | Bias-corrected fourth standardized moment; $0$ for a Gaussian | No | No |
 
-The final column is the operative one and is derived in "Distributional Statistics & the Quantization Resolution Floor" (Appendix E). Order statistics can only return values on the pitch encoder's output grid, so on pYIN data their confidence intervals collapse to zero width and they must be read as naming a $5$-cent cell rather than as measurements. The trimmed mean is the recommended single robust figure because it averages the surviving values rather than selecting one, and so remains resolvable while still discarding the heavy tails.
-
----
-
-## 10. References & Bibliography
-
-For further reading on the mathematical principles and signal processing algorithms implemented in this engine, refer to the foundational literature below:
-
-1. **Pitch Tracking Engines (pYIN & REAPER):**
-   * Mauch, M., & Dixon, S. (2014). *pYIN: A Fundamental Frequency Estimator Using Probabilistic Threshold Distributions*. Proceedings of the IEEE ICASSP.
-   * De Cheveigné, A., & Kawahara, H. (2002). *YIN, a fundamental frequency estimator for speech and music*. JASA, 111(4), 1917-1930.
-   * Talkin, D. (1995). *A Robust Algorithm for Pitch Tracking (RAPT)*. In Speech Coding and Synthesis (pp. 495–518). Elsevier Science B.V.
-   * Talkin, D. (2015). *REAPER: Robust Epoch And Pitch EstimatoR* [Computer software]. Google. https://github.com/google/REAPER
-
-2. **Dynamic Time Warping (DTW) & Chroma Features:**
-   * Müller, M. (2015). *Fundamentals of Music Processing: Audio, Analysis, Algorithms, Applications*. Springer. (Specifically Chapter 3 on Music Synchronization and Chapter 4 on DTW).
-   * Ellis, D. P. W., & Poliner, G. E. (2007). *Identifying 'cover songs' with chroma features and dynamic programming beat tracking*. Proceedings of the IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP).
-   * Abeßer, J., Frieler, K., Dittmar, C., & Schuller, B. (2014). *Score-informed analysis of tuning, intonation, pitch glide, and vibrato in jazz solos*. Proceedings of the 15th International Society for Music Information Retrieval Conference (ISMIR).
-
-3. **Music Performance Assessment & Harmonic Folding:**
-   * Molina, E., Barbancho, A. M., Tardón, L. J., & Barbancho, I. (2014). *Fundamental frequency alignment vs. note-based melody tracking in music performance assessment*. Proceedings of the 15th ISMIR Conference.
-   * Devaney, J., Mandel, M. I., & Fujinaga, I. (2012). *A study of intonation in three-part singing using the Open Multitrack Testbed*. Proceedings of the 13th ISMIR Conference.
-   * Gómez, E., & Bonada, J. (2013). *Towards computer-assisted flamenco transcription: An experimental comparison of automatic transcription algorithms as applied to a cappella singing*. Computer Music Journal, 37(2), 73-90.
-
-4. **String Performance Gesture (Vibrato & Portamento Rates):**
-   * Allen, M. L., Geringer, J. M., & MacLeod, R. B. (2009). *Performance practice of violin vibrato: An artist-level case study*. String Research Journal, 1(1), 27–37. (Source of the vibrato rate/extent figures underpinning the $\theta_{slope}$ derivation in §4B.)
-   * Geringer, J. M., MacLeod, R. B., & Ellis, J. C. (2014). *Two studies of pitch in string instrument vibrato: Perception and pitch matching responses of university and high school string players*. International Journal of Music Education, 32(1), 19–30.
-   * Fletcher, N. H., & Rossing, T. D. (1998). *The Physics of Musical Instruments* (2nd ed.). Springer. (Chapter 10 on bowed string excitation and the Helmholtz motion.)
-
-5. **A-Weighting & Acoustic Loudness Standards:**
-   * International Electrotechnical Commission (IEC). (2003). *IEC 61672-1: Electroacoustics - Sound level meters - Part 1: Specifications*. (Defines the standard A-weighting filter curve $R_A(f)$).
-   * Fletcher, H., & Munson, W. A. (1933). *Loudness, its definition, measurement and calculation*. The Journal of the Acoustical Society of America. (Foundational research on equal-loudness contours).
-
-6. **Digital Signal Processing & Python Ecosystem:**
-   * McFee, B., Raffel, C., Liang, D., Ellis, D. P. W., McVicar, M., Battenberg, E., & Nieto, O. (2015). *librosa: Audio and Music Signal Analysis in Python*. Proceedings of the 14th Python in Science Conference.
-   * librosa development team. (2025). *`librosa.pyin` API reference*, v0.11.0. (Documents `switch_prob = 0.01` and `max_transition_rate = 35.92` octaves/second as the library defaults referenced in §3A and §4B.)
+The final column is the operative one and is derived in Appendix J. Order statistics can only return values on the pitch encoder's output grid, so on pYIN data their confidence intervals collapse to zero width and they must be read as naming a $5$-cent cell rather than as measurements. The trimmed mean is the recommended single robust figure because it averages the surviving values rather than selecting one, and so remains resolvable while still discarding the heavy tails.
 
 ---
 
-## 11. Expansion to Non-String Instruments (Winds & Brass)
+## 10. Scope Limitations and Planned Expansion to Non-String Instruments
 
-While the Hello-Audio architecture was rigorously validated on the complex acoustic profiles of bowed string instruments (Violin, Viola, Cello, and Double Bass), the underlying digital signal processing pipeline is fundamentally agnostic to the sound source. 
+### Current Validated Scope
 
-To formally incorporate non-string instruments (such as the Flute, Clarinet, Oboe, Trumpet, or Saxophone) into future intonation reporting, the architectural pipeline requires minimal modification:
+Every empirical result in this manual was produced on **violin, viola and cello** material drawn from the URMP dataset, and the application exposes exactly those three instruments in `get_instrument_fmin_fmax()`. The validated scope of the engine is therefore limited to those three instruments. In particular:
+
+* **Double bass is not supported.** No frequency bounds are defined for it, and no double-bass material appears in any validation study reported here. The URMP string corpus under the current validation protocol comprises 15 pieces and 41 stems — 23 violin, 8 viola and 10 cello (Appendix A). Results reported against the superseded 58-stem corpus (34 violin, 13 viola, 11 cello) are labelled as such where they appear.
+* **Sample rate.** The Engine Optimal Defaults are validated for material at 44.1 kHz and above; the URMP corpus is 48 kHz. Because $\theta_{slope}$ is specified per frame at a fixed hop of 512 samples, its effective rate limit scales with $f_s$ (§4B).
+* **Monophonic stems only.** The pipeline assumes a single sounding voice per input file. Polyphonic or ensemble mixes are outside scope.
+* **No perceptual validation has been performed.** The engine is validated metrologically only — against synthesized tones of known frequency, against a MIDI score, and against a second configuration of itself. It has never been compared to a trained listener. Its precision on string timbre ($2.65$ cents, Appendix E) is finer than the human discrimination threshold for successive complex tones, which is on the order of $5$–$10$ cents (Moore, 2012), so the measurement is not the limiting factor in any such comparison; but sufficient resolution is a necessary condition for criterion validity and not a demonstration of it. Whether the system's flat / in-tune / sharp judgements agree with those of a trained string player is untested, and no claim to that effect is made anywhere in this manual. Appendix K states the argument in full and specifies the study that would close the gap.
+* **The corpus has been de-duplicated from 58 stems to 41.** Seventeen URMP string stems were reused takes of another stem — 12 byte-identical, 5 detectable only by waveform correlation. The seven pieces contributing no unique string audio are now excluded from the validation protocol outright (Appendix A). Studies published against the old 58- and 15-stem corpora retain their original figures and are annotated with the effect of exclusion; where an interval was drawn from the pooled corpus, it was understated.
+
+### Planned Expansion to Winds and Brass
+
+The underlying digital signal processing pipeline is agnostic to the sound source, so extension beyond bowed strings is a matter of calibration rather than architecture. To formally incorporate non-string instruments (such as the Flute, Clarinet, Oboe, Trumpet, or Saxophone) into future intonation reporting, the architectural pipeline requires minimal modification:
 1. **Frequency Bounding:** The `pitch_engine.py` configuration must be expanded to include the physical tessitura ($f_{\min}$ and $f_{\max}$) for the new instruments. For example, a standard B$\flat$ Clarinet would require limits spanning approximately $146.83\text{ Hz}$ (D3) to $1567.98\text{ Hz}$ (G6).
 2. **Engine Selection:** Wind and brass instruments generally produce a cleaner, more stable fundamental tone lacking the mechanical "slip-stick" friction inherent to bowed strings. Consequently, the probabilistic HMM logic of **pYIN** is highly recommended for these instruments, as it excels on stable timbres without relying on the discrete acoustic epochs that **REAPER** uses for bowed strings.
 
-Once the appropriate frequency bounds are established, the system's DTW temporal alignment, RMS amplitude filtering, and harmonic folding logic will function identically, enabling robust and precise microtonal analysis of wind and brass intonation.
+Once the appropriate frequency bounds are established, the system's DTW temporal alignment, RMS amplitude filtering, and harmonic folding logic will function identically. Extension nevertheless requires the same metrological validation applied to strings in Appendices E–J before any wind or brass result may be reported, since neither the vibrato bound underpinning $\theta_{slope}$ (§4B) nor the epoch analogy underpinning REAPER (§3B) transfers to a non-bowed excitation mechanism.
 
 ---
 
-## Appendix A: Exploratory Batch Test Results (REAPER vs. pYIN)
+## 11. References
 
-This appendix documents the exhaustive batch test results across the URMP string ensemble dataset for both the REAPER and pYIN pitch tracking engines. This side-by-side comparison serves as the empirical evidence for transitioning the primary string extraction architecture to REAPER.
+Abeßer, J., Frieler, K., Dittmar, C., & Schuller, B. (2014). Score-informed analysis of tuning, intonation, pitch glide, and vibrato in jazz solos. In *Proceedings of the 15th International Society for Music Information Retrieval Conference* (pp. 259–264).
+
+Allen, M. L., Geringer, J. M., & MacLeod, R. B. (2009). Performance practice of violin vibrato: An artist-level case study. *String Research Journal, 1*(1), 27–37.
+
+de Cheveigné, A., & Kawahara, H. (2002). YIN, a fundamental frequency estimator for speech and music. *The Journal of the Acoustical Society of America, 111*(4), 1917–1930.
+
+Devaney, J., Mandel, M. I., & Fujinaga, I. (2012). A study of intonation in three-part singing using the Automatic Music Performance Analysis and Comparison Toolkit (AMPACT). In *Proceedings of the 13th International Society for Music Information Retrieval Conference*.
+
+Ellis, D. P. W., & Poliner, G. E. (2007). Identifying "cover songs" with chroma features and dynamic programming beat tracking. In *Proceedings of the IEEE International Conference on Acoustics, Speech and Signal Processing* (Vol. 4, pp. 1429–1432). IEEE.
+
+Fleiss, J. L. (1971). Measuring nominal scale agreement among many raters. *Psychological Bulletin, 76*(5), 378–382.
+
+Fletcher, H., & Munson, W. A. (1933). Loudness, its definition, measurement and calculation. *The Journal of the Acoustical Society of America, 5*(2), 82–108.
+
+Fletcher, N. H., & Rossing, T. D. (1998). *The physics of musical instruments* (2nd ed.). Springer.
+
+Geringer, J. M., MacLeod, R. B., & Ellis, J. C. (2014). Two studies of pitch in string instrument vibrato: Perception and pitch matching responses of university and high school string players. *International Journal of Music Education, 32*(1), 19–30.
+
+Gómez, E., & Bonada, J. (2013). Towards computer-assisted flamenco transcription: An experimental comparison of automatic transcription algorithms as applied to a cappella singing. *Computer Music Journal, 37*(2), 73–90.
+
+International Electrotechnical Commission. (2003). *Electroacoustics — Sound level meters — Part 1: Specifications* (IEC 61672-1:2003).
+
+Larrouy-Maestri, P., Lévêque, Y., Schön, D., Giovanni, A., & Morsomme, D. (2013). The evaluation of singing voice accuracy: A comparison between subjective and objective methods. *Journal of Voice, 27*(2), 259.e1–259.e5.
+
+Li, B., Liu, X., Dinesh, K., Duan, Z., & Sharma, G. (2019). Creating a multitrack classical music performance dataset for multimodal music analysis: Challenges, insights, and applications. *IEEE Transactions on Multimedia, 21*(2), 522–535.
+
+librosa development team. (2025). *librosa.pyin API reference* (Version 0.11.0) [Software documentation].
+
+Mauch, M., & Dixon, S. (2014). pYIN: A fundamental frequency estimator using probabilistic threshold distributions. In *Proceedings of the IEEE International Conference on Acoustics, Speech and Signal Processing* (pp. 659–663). IEEE.
+
+McFee, B., Raffel, C., Liang, D., Ellis, D. P. W., McVicar, M., Battenberg, E., & Nieto, O. (2015). librosa: Audio and music signal analysis in Python. In *Proceedings of the 14th Python in Science Conference* (pp. 18–25).
+
+Molina, E., Barbancho, A. M., Tardón, L. J., & Barbancho, I. (2014). Evaluation framework for automatic singing transcription. In *Proceedings of the 15th International Society for Music Information Retrieval Conference*.
+
+Moore, B. C. J. (2012). *An introduction to the psychology of hearing* (6th ed.). Emerald.
+
+Müller, M. (2015). *Fundamentals of music processing: Audio, analysis, algorithms, applications*. Springer.
+
+Sundberg, J. (1987). *The science of the singing voice*. Northern Illinois University Press.
+
+Talkin, D. (1995). A robust algorithm for pitch tracking (RAPT). In W. B. Kleijn & K. K. Paliwal (Eds.), *Speech coding and synthesis* (pp. 495–518). Elsevier.
+
+Talkin, D. (2015). *REAPER: Robust Epoch And Pitch EstimatoR* (Version 1.0) [Computer software]. Google. https://github.com/google/REAPER
+
+> [!NOTE]
+> **Editorial note on this list.** Entries follow APA 7th edition: a single alphabetized list, sentence-case titles, italicized source titles, and italicized volume numbers. Digital object identifiers have been omitted pending verification against the publisher records; they should be appended before external circulation, as APA 7 requires a DOI wherever one is assigned.
+
+---
+
+## Appendix A: Batch Performance on the URMP Corpus (REAPER vs. pYIN)
+
+This appendix documents the batch evaluation of both pitch tracking engines across the full URMP string ensemble corpus. It is the macro-yield half of the evidence base for the Dual-Engine Architecture: it establishes that **pYIN attains higher detection yield than REAPER on every instrument class, and higher inclusion yield on all but viola** (where REAPER leads by under 1 pp — see *Status of the Reported Figures*), while Appendix B establishes the countervailing microtonal-resolution advantage of REAPER. The two appendices are read together in the *Architectural Conclusion* of Appendix B.
+
+> [!IMPORTANT]
+> **Step pattern.** All figures in this appendix were produced under the classical step size condition $\Sigma_1$, which was the implementation in force when the batch was run. The engine has since moved to the restricted condition $\Sigma_2$; Appendix D reports the resulting deltas on the K515 quintet and its baseline column is exactly the K515 rows below. The Appendix A figures are therefore retained as the **$\Sigma_1$ baseline** rather than regenerated, so that the two appendices remain comparable. Aggregate yields under $\Sigma_2$ would be expected to run roughly 2 pp higher.
 
 ### Testing Methodology
-The evaluation was conducted on 58 individual monophonic string track stems from the URMP dataset. Both engines were evaluated using the same temporal warping mask (DTW) to align the acoustic output to the MIDI ground truth. The algorithms were run with their experimentally derived optimal parameters.
+The evaluation was conducted on 58 individual monophonic string track stems from the URMP dataset (Li et al., 2019): 34 violin, 13 viola and 11 cello. Both engines were evaluated using the same temporal warping mask (DTW) to align the acoustic output to the MIDI ground truth. The algorithms were run at the Engine Optimal Defaults of §9. The batch script is `tests/scripts/batch/run_appendix_a.py` and the per-track results are archived at `tests/outputs/batch_results/appendix_a_results.csv`.
 
 **Optimal Parameters (pYIN):**
 - `frame_length`: 2048
@@ -804,7 +869,7 @@ The evaluation was conducted on 58 individual monophonic string track stems from
 
 ### 0. Validation Confirmation: Correction Logic Active Across All 58 Tracks
 
-Before interpreting the yield figures, it is important to establish that the correction and exclusion logic is fully engaged in the pipeline that produced these results. The batch script (`run_appendix_a.py`) uses a fully explicit `toggles` dictionary with `harmonic_folding: True`, `slope_filter: True`, `duration_filter: True`, `locked_target: True`, and `force_global: True`. These toggles are passed directly into `process_dtw_alignment`, which calls `apply_harmonic_folding` and propagates the resulting `correction_array` into `calculate_dtw_metrics`. The `is_note_excluded()` helper — the single shared source of truth used in both the application UI and the batch script — then excludes any note where `Correction_Applied = True` or `|Deviation_Cents| > 100`, reducing the **Included Yield** below the **Detected Yield**.
+Before interpreting the yield figures, it is important to establish that the correction and exclusion logic is fully engaged in the pipeline that produced these results. The batch script (`tests/scripts/batch/run_appendix_a.py`) uses a fully explicit `toggles` dictionary with `harmonic_folding: True`, `slope_filter: True`, `duration_filter: True`, `locked_target: True`, and `force_global: True`. These toggles are passed directly into `process_dtw_alignment`, which calls `apply_harmonic_folding` and propagates the resulting `correction_array` into `calculate_dtw_metrics`. The `is_note_excluded()` helper — the single shared source of truth used in both the application UI and the batch script — then excludes any note where `Correction_Applied = True` or `|Deviation_Cents| > 100`, reducing the **Included Yield** below the **Detected Yield**.
 
 The most direct evidence that this exclusion chain is active is the non-zero **Det–Inc gap** observed across the full dataset:
 
@@ -817,17 +882,130 @@ If harmonic folding or any exclusion logic were disabled, the Included Yield wou
 
 #### Known Dataset Anomalies
 
-The following structural anomalies are declared for transparency. They do not affect the validity of the pipeline but should be noted when citing the N=58 figure.
+> [!CAUTION]
+> **The figures in this appendix were produced on the superseded 58-stem corpus, which contained duplicated audio. They are retained as a historical baseline and are no longer the validation corpus.** The current protocol is defined immediately below; §1–§3 of this appendix have not been regenerated against it. See *Status of the Reported Figures* for which specific claims are affected.
 
-**Duplicate Piece Folders (URMP Dataset Structure)**
-Several URMP pieces exist under two numerical folder variants representing distinct recordings of the same score (e.g., `19_Pavane` / `20_Pavane`; `24_Pirates` / `25_Pirates`; `26_King` / `27_King`; `35_Rondeau` / `36_Rondeau`; `38_Jerusalem` / `39_Jerusalem`). These are separate audio files and are processed independently. Results within each pair are identical or near-identical as expected. This structure is intrinsic to the URMP dataset and is preserved in the evaluation to maintain full dataset coverage.
+**Reused Takes Across Piece Folders (URMP Dataset Structure)**
+Several URMP pieces exist under two numerical folder variants that differ only in the instrumentation of *another* part, and consequently reuse a single recorded take for the parts they hold in common. This structure is intrinsic to URMP: the string players were recorded once, and the resulting stems were bundled into multiple mixed-instrumentation arrangements.
 
-**Nocturne Tracks 17 and 18 (`AuSep_1_vn_17_Nocturne` / `AuSep_1_vn_18_Nocturne`)**
-Both Nocturne folders produce bit-for-bit identical results across both engines (REAPER: 95.68% / 80.58%; pYIN: 98.56% / 97.84%). This is consistent with both folders containing the same audio file or MIDI file. These tracks are retained in the N=58 count but should be treated as a single data point if de-duplicated in future revisions.
+Earlier revisions of this manual preserved both variants "to maintain full corpus coverage" and declared the resulting redundancy as a transparency note. **That decision has been reversed.** Reused takes are not independent observations, and retaining them inflates $n$ without adding information. The affected pieces are now excluded from the corpus outright.
+
+##### The URMP Validation Protocol (Current)
+
+Seven pieces are **excluded in full** because every string part they contain is a reused take already present under another piece number:
+
+| Excluded piece | Redundant with | Parts removed |
+| :--- | :--- | :---: |
+| `18_Nocturne_vn_fl_tpt` | `17_Nocturne` | 1 |
+| `20_Pavane_tpt_vn_vc` | `19_Pavane` | 2 |
+| `25_Pirates_vn_vn_va_sax` | `24_Pirates` | 3 |
+| `27_King_vn_vn_va_sax` | `26_King` | 3 |
+| `35_Rondeau_vn_vn_va_db` | `36_Rondeau` | 3 |
+| `37_Rondeau_fl_vn_va_cl` | `36_Rondeau` | 2 |
+| `39_Jerusalem_vn_vn_va_sax_db` | `38_Jerusalem` | 3 |
+
+This removes **17 redundant stems**, leaving **15 pieces and 41 unique string performances** (23 violin, 8 viola, 10 cello). Exclusion is at the level of the whole piece rather than the individual stem, so that no piece is represented by a partial set of parts. `36_Rondeau` is retained over `35_Rondeau` and `37_Rondeau` because it is the only Rondeau variant carrying a cello part; the two discarded variants contribute no unique string audio.
+
+Verification is by exhaustive pairwise waveform correlation over decoded 24-bit PCM, not by file hash — see the methodological note below. After exclusion, **zero duplicate pairs remain**: no two stems in the corpus exceed $|r| = 0.5$.
+
+> [!IMPORTANT]
+> **Content hashing understates the redundancy, and the earlier figure of 12 duplicates was an undercount.** An MD5/SHA content hash detects only byte-identical files. Of the seventeen redundant stems, 12 are byte-identical to their retained counterpart — exactly the 12 the earlier hash-based audit found — but **five are not, and were invisible to it**:
+>
+> | Redundant stem | Same take as | Relationship | Detectable by hash? |
+> | :--- | :--- | :--- | :---: |
+> | `AuSep_2_vn_20_Pavane` | `AuSep_2_vn_19_Pavane` | $r = 1.00000$, differs by $\le 1$ LSB at 24-bit | No |
+> | `AuSep_3_vc_20_Pavane` | `AuSep_3_vc_19_Pavane` | $r = 1.00000$, differs by $\le 1$ LSB at 24-bit | No |
+> | `AuSep_2_vn_25_Pirates` | `AuSep_2_vn_24_Pirates` | $r = 1.00000$, differs by $\le 1$ LSB at 24-bit | No |
+> | `AuSep_3_va_35_Rondeau` | `AuSep_3_va_36_Rondeau` | $r = 1.00000$, identical waveform at $1.818\times$ gain | No |
+> | `AuSep_3_va_37_Rondeau` | `AuSep_3_va_36_Rondeau` | $r = 1.00000$, identical waveform at $1.818\times$ gain | No |
+>
+> So the corpus held **17 redundant stems, not 12**, and **41 unique performances, not 46**. The $\le 1$ LSB cases deviate by roughly $-140$ dBFS and are the same performance to well below any perceptual or analytical threshold. The gain cases are the consequential ones: `36_Rondeau`'s viola stem is the same recording as `35_Rondeau`'s and `37_Rondeau`'s scaled by $0.550$ ($-5.2$ dB), which a hash, a duration check, and a spot comparison of summary statistics would all pass as distinct. They were found only by correlating decoded sample vectors.
+>
+> **This also corrects the explanation given in earlier revisions.** The small divergence previously observed between the `35_Rondeau` and `36_Rondeau` viola rows (mean deviation $+1.27$ Hz vs. $+1.18$ Hz) was attributed to "distinct MIDI reference scores despite the shared audio." That is incorrect — the two pieces ship a byte-identical MIDI file. The divergence is caused by the $-5.2$ dB gain offset interacting with the RMS amplitude gate of §4A, which admits a different frame set on the quieter copy. The `19_Pavane` / `20_Pavane` divergence *does* have the previously stated cause: those two pieces carry genuinely different MIDI files.
+
+##### Part Selection from Full-Score MIDI
+
+The `.mid` files distributed into each part directory of a piece are byte-identical to one another — `24_Pirates` ships one file copied into `1_vn`, `2_vn`, `3_va` and `4_vc`. These are **full-score MIDIs, not per-part transcriptions**. `44_K515` is the sole exception: its parts carry genuinely distinct single-part MIDI files, manually exported from the condensed score, under an explicit naming convention (`...-Violin,_Violin_I.mid`).
+
+**This is handled correctly, and the two conventions are reconciled by the same code path.** The batch and validation scripts derive the part index from the audio filename and pass it to `parse_midi_with_timing(..., target_track=N)`, which filters events to that MIDI track:
+
+```
+AuSep_1_vn_24_Pirates.wav  ->  stem.split('_')[1] = "1"  ->  target_track = 1
+```
+
+The URMP full-score files are MIDI Format 1 with a silent conductor track at index 0 and one part per subsequent track, so **track $N$ is part $N$** and the filename index maps directly onto it. This was verified across all 41 retained stems: every stem resolves to a non-empty track whose pitch range falls inside the nominal tessitura of its labelled instrument, with no cross-part collisions.
+
+| Piece class | MIDI structure | Track requested | Resolves via |
+| :--- | :--- | :---: | :--- |
+| The 14 full-score pieces | Format 1, $n{+}1$ tracks, track 0 silent | $N$ = part index | Direct hit |
+| `44_K515` | Format 1, **1 track**, notes on track 0 | $N \in \{1..5\}$ — empty | Fallback to track 0 |
+
+##### Strict Track Resolution
+
+Earlier revisions resolved the track with a silent fallback chain: if the requested track held no notes, the loader retried track 0, then track 1. For `44_K515` this landed correctly by accident, but applied to a *full-score* file with an empty requested track it would have fallen through to **track 1 — Violin I — and silently evaluated the wrong part against the audio**, reporting a plausible-looking yield rather than an error. No stem in the corpus ever triggered it, so no published figure is affected.
+
+That chain has been removed. `resolve_target_track()` in `src/midi_parser.py` now resolves in a fixed order and raises `MidiTrackError` rather than guessing:
+
+| Condition | Resolution |
+| :--- | :--- |
+| Exactly one track carries notes | Use it, regardless of what was requested — a single-part MIDI *is* the part |
+| Explicit track requested | Honoured if it carries notes, else raise. **No fallback.** |
+| Part index given, track 0 silent | Map part $N$ onto track $N$ (the conductor-track convention) |
+| Part index given, **track 0 carries notes** | Raise — the convention does not hold and the mapping would be off by one |
+
+The last row is the guard against the failure this section describes: a condensed score that omits the conductor track would otherwise shift *every* part by one, producing wrong-but-plausible results across a whole piece.
+
+The interactive path applies the same arity rule. `app/app.py` prompts for a track only when several carry notes, and the selector now labels each with its pitch range, duration and instrument fit —
+
+```
+Track 3 — 136 notes, E3–C♯5, 47.7 s  ✓ fits Viola
+Track 4 — 178 notes, D2–F♯3, 47.7 s  ✗ outside Viola (fits Cello)
+```
+
+— so that choosing a part from a condensed score is an informed decision rather than a guess at a bare note count. If the selected track falls outside the chosen instrument's tessitura the app warns but does not block, since transposing parts and scordatura are legitimate.
+
+> [!NOTE]
+> **What the tessitura check cannot catch.** It is a containment test, so it separates instrument *classes* — a cello part selected under a violin setting is caught — but two parts for the same instrument overlap almost entirely. **A Violin I / Violin II swap passes it silently**, and nine of the fifteen retained pieces have two violin parts. The only signal that detects such a swap is alignment yield: the two parts play different notes, so a swap collapses detection yield rather than merely lowering it. Across the corpus every violin I/II pair returns 88–100% inclusion yield, which is the positive evidence that no such swap is present. `tests/test_midi_part_selection.py` sweeps all 41 stems on every run, asserting each resolves to a non-empty part inside its instrument's range.
+
+##### Low Detection Yield Advisory
+
+Because a same-instrument part swap is invisible to the range check, the application flags an unusually low **detection yield** after analysis and asks the user to confirm the pairing. The message is advisory: low yield has innocent causes — difficult or quiet material, an aggressive amplitude gate — so it names the failure it exists to catch rather than asserting a mistake.
+
+The thresholds are **engine-specific**, calibrated against the observed floor on genuine corpus material:
+
+| Engine | Threshold | Worst genuine corpus yield | Margin |
+| :--- | :---: | :---: | :---: |
+| pYIN | 50% | 70.59% (`AuSep_3_va_24_Pirates`) | 20.6 pp |
+| REAPER | 40% | 46.76% (`AuSep_1_vn_12_Spring`) | 6.8 pp |
+
+A single shared threshold was rejected. REAPER's detection floor is lower by architecture — epoch dropout in the upper register (§3B) — and at 50% it would fire on `AuSep_1_vn_12_Spring`, a track whose low yield is a documented engine limitation rather than a file mismatch. A warning that fires on known-good input is one users learn to dismiss, which would defeat its only purpose. `test_no_corpus_stem_triggers_the_warning` asserts a zero false-positive rate across all 41 stems on both engines.
+
+The margins are asymmetric and should be read honestly: pYIN's 20.6 pp is comfortable, REAPER's 6.8 pp is not. The REAPER threshold is set from a single worst-case track and would need revisiting if the corpus were extended to material that stresses epoch tracking harder.
+
+> [!WARNING]
+> **`scripts/headless.py` remains an exception.** It calls `parse_midi_with_timing(f, target_track=None)`, which **merges every track in the file**. Passing a URMP full-score MIDI to the CLI therefore aligns one part's audio against all parts' notes. No published figure is affected — every result in this manual comes from the batch and validation scripts, which resolve an explicit part index — but the CLI is correct only for single-part MIDI input and does not currently say so.
+
+##### Status of the Reported Figures
+
+Recomputing this appendix's aggregates over the 41 retained stems — possible without re-running either engine, since the archived per-track results at `tests/outputs/batch_results/appendix_a_results.csv` are unaffected by which rows are later pooled — moves every headline figure by less than half a percentage point:
+
+| Metric | $N = 58$ (superseded) | $N = 41$ (protocol) | $\Delta$ |
+| :--- | :---: | :---: | :---: |
+| REAPER detected yield | 88.74% | 88.77% | $+0.03$ pp |
+| REAPER included yield | 79.11% | 78.78% | $-0.34$ pp |
+| REAPER mean deviation | $+1.65$ Hz | $+1.51$ Hz | $-0.14$ Hz |
+| pYIN detected yield | 94.40% | 94.64% | $+0.25$ pp |
+| pYIN included yield | 89.93% | 89.69% | $-0.23$ pp |
+| pYIN mean deviation | $+1.50$ Hz | $+1.45$ Hz | $-0.05$ Hz |
+
+The duplicated stems were close enough to the corpus mean that removing their double-weighting barely moves it. **No conclusion in this appendix rests on a margin that de-duplication erases**, with one exception, which de-duplication did not create:
+
+> [!WARNING]
+> **The claim that pYIN leads REAPER on *every* instrument class is false, both before and after de-duplication.** On viola included yield, REAPER leads pYIN — 82.34% vs. 82.18% at $N = 58$ (visible in the §2 table below, which has always reported it), and 81.61% vs. 80.99% at $N = 41$. De-duplication widens the gap from $0.16$ pp to $0.62$ pp but is not its cause; the summary sentence at the head of this appendix and the corresponding claim in Appendix B's *Architectural Conclusion* have overstated the §2 table since they were written. pYIN's lead holds on all six other instrument $\times$ metric combinations, and on viola *detected* yield ($91.52\%$ vs. $89.86\%$), so the dual-engine argument is unaffected in substance — but "on every instrument class" should read "on every instrument class except viola included yield, where the two engines are within 1 pp."
 
 #### Problem Track Analysis (REAPER Det. Yield < 80%)
 
-Twelve tracks show REAPER detection yields below 80%. pYIN largely recovers the same material, which is consistent with the documented REAPER limitations described in Section 3B (low-frequency epoch dropouts, 16 kHz quantization grid, and epoch mistrack at fast tempi).
+Twelve tracks show REAPER detection yields below 80%. pYIN largely recovers the same material, which is consistent with the documented REAPER limitations described in §3B (low-frequency epoch dropouts, 16 kHz quantization grid, and epoch mistrack at fast tempi).
 
 | Track | Inst. | REAPER Det | REAPER Inc | pYIN Det | pYIN Inc | Likely Cause |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -841,8 +1019,8 @@ Twelve tracks show REAPER detection yields below 80%. pYIN largely recovers the 
 | AuSep_3_va_25_Pirates | Viola | 71.32% | 66.18% | 70.59% | 63.24% | Duplicate of above |
 | AuSep_1_vn_35_Rondeau | Violin | 75.62% | 64.67% | 96.07% | 94.83% | Fast tempo (184 BPM); REAPER epoch mistrack |
 | AuSep_1_vn_36_Rondeau | Violin | 75.62% | 64.67% | 96.07% | 94.83% | Duplicate of above |
-| AuSep_1_vn_44_K515 | Violin | 70.74% | 54.50% | 98.87% | 94.37% | Dense Mozart; REAPER harmonic confusion |
-| AuSep_4_va_44_K515 | Viola | 78.02% | 64.01% | 83.27% | 56.61% | pYIN Inc also low; genuine alignment difficulty |
+| AuSep_1_vn_44_K515 | Violin | 69.45% | 54.98% | 98.39% | 95.98% | Dense Mozart; REAPER harmonic confusion |
+| AuSep_4_va_44_K515 | Viola | 75.68% | 63.81% | 81.71% | 57.20% | pYIN Inc also low; genuine alignment difficulty |
 
 ### 1. Overall Batch Performance
 | Engine | Detected Yield (%) | Included Yield (%) | Mean Deviation (Hz) |
@@ -866,7 +1044,7 @@ The following tables provide the exhaustive breakdown of the detection yield and
 
 > [!WARNING]
 > **Methodology Caveat: `AuSep_5_vc_44_K515`**
-> This dataset was evaluated using the application's default **Global DTW alignment mode**. As documented in Section 6, evaluating this specific 411-second cello track under *subsequence* DTW mode causes a catastrophic ~40 percentage point yield collapse due to cumulative temporal drift in the back half of the recording. Notably, the Violin 2 part from the same 411-second piece (`AuSep_2_vn_44_K515`) was unaffected under identical conditions, indicating the vulnerability is track-specific rather than duration-driven.
+> This dataset was evaluated using the application's default **Global DTW alignment mode**. As documented in §6, evaluating this specific 411-second cello track under *subsequence* DTW mode causes a catastrophic ~40 percentage point yield collapse due to cumulative temporal drift in the back half of the recording. Notably, the Violin 2 part from the same 411-second piece (`AuSep_2_vn_44_K515`) was unaffected under identical conditions, indicating the vulnerability is track-specific rather than duration-driven.
 
 #### REAPER Engine Results
 | Dataset Piece | Part | Instrument | Det. Yield (%) | Inc. Yield (%) | Mean Dev. (Hz) |
@@ -924,11 +1102,11 @@ The following tables provide the exhaustive breakdown of the detection yield and
 | AuSep_1_vn_39_Jerusalem | 1_vn | Violin | 96.49% | 92.98% | +4.58 |
 | AuSep_2_vn_39_Jerusalem | 2_vn | Violin | 93.33% | 89.44% | +1.64 |
 | AuSep_3_va_39_Jerusalem | 3_va | Viola | 91.62% | 81.44% | +1.23 |
-| AuSep_1_vn_44_K515 | 1_vn | Violin | 70.74% | 54.50% | +3.78 |
-| AuSep_2_vn_44_K515 | 2_vn | Violin | 90.15% | 66.04% | +1.61 |
-| AuSep_3_va_44_K515 | 3_va | Viola | 95.39% | 82.39% | +0.31 |
-| AuSep_4_va_44_K515 | 4_va | Viola | 78.02% | 64.01% | +1.66 |
-| AuSep_5_vc_44_K515 | 5_vc | Cello | 95.56% | 76.94% | +0.36 |
+| AuSep_1_vn_44_K515 | 1_vn | Violin | 69.45% | 54.98% | +4.34 |
+| AuSep_2_vn_44_K515 | 2_vn | Violin | 86.16% | 67.30% | +1.18 |
+| AuSep_3_va_44_K515 | 3_va | Viola | 93.71% | 82.39% | +0.36 |
+| AuSep_4_va_44_K515 | 4_va | Viola | 75.68% | 63.81% | +1.66 |
+| AuSep_5_vc_44_K515 | 5_vc | Cello | 90.83% | 73.61% | +0.27 |
 
 #### pYIN Engine Results
 | Dataset Piece | Part | Instrument | Det. Yield (%) | Inc. Yield (%) | Mean Dev. (Hz) |
@@ -986,20 +1164,25 @@ The following tables provide the exhaustive breakdown of the detection yield and
 | AuSep_1_vn_39_Jerusalem | 1_vn | Violin | 98.83% | 98.25% | +3.61 |
 | AuSep_2_vn_39_Jerusalem | 2_vn | Violin | 93.33% | 90.56% | +0.88 |
 | AuSep_3_va_39_Jerusalem | 3_va | Viola | 94.01% | 82.63% | +1.33 |
-| AuSep_1_vn_44_K515 | 1_vn | Violin | 98.87% | 94.37% | +6.32 |
-| AuSep_2_vn_44_K515 | 2_vn | Violin | 93.92% | 68.76% | +0.97 |
-| AuSep_3_va_44_K515 | 3_va | Viola | 99.37% | 94.34% | +0.62 |
-| AuSep_4_va_44_K515 | 4_va | Viola | 83.27% | 56.61% | +1.76 |
-| AuSep_5_vc_44_K515 | 5_vc | Cello | 96.94% | 83.89% | +0.44 |
+| AuSep_1_vn_44_K515 | 1_vn | Violin | 98.39% | 95.98% | +6.84 |
+| AuSep_2_vn_44_K515 | 2_vn | Violin | 91.82% | 71.70% | +0.75 |
+| AuSep_3_va_44_K515 | 3_va | Viola | 97.48% | 92.87% | +0.69 |
+| AuSep_4_va_44_K515 | 4_va | Viola | 81.71% | 57.20% | +1.56 |
+| AuSep_5_vc_44_K515 | 5_vc | Cello | 93.61% | 82.22% | +0.51 |
 
+---
 
+## Appendix B: Microtonal Resolution and the Dual-Engine Architecture
 
+Appendix A establishes which engine detects more notes. This appendix establishes which engine measures a detected note more precisely, and the two results together determine the engine architecture.
 
-## Appendix B: Resample Pitch Modulation Validation
+### 1. Testing Methodology
 
-### 2. Full Quintet Microtonal Resolution (Expanded Simulation)
+A batch simulation was conducted across the entire five-part K515 quintet (Violin I, Violin II, Viola I, Viola II, Cello). Microtonal pitch shifts of $\pm 25$ and $\pm 50$ cents were induced across all five multi-minute tracks by mathematical resampling, which avoids the phase-vocoder artifacts that a time-preserving pitch shift would introduce. Because the shift is applied to the signal itself, the injected offset is known exactly and serves as ground truth. The median extracted deviation of each engine was then compared against it. The batch script is `tests/scripts/batch/test_batch_resample_modulation.py`.
 
-To determine the optimal architectural engine, a batch simulation was conducted across the entire 5-instrument K515 dataset (Violin 1, Violin 2, Viola 1, Viola 2, Cello). Microtonal pitch shifts were artificially induced of $\pm 25$ and $\pm 50$ cents across all five multi-minute tracks using mathematical resampling (avoiding phase-vocoder artifacts) and evaluated the median extraction accuracy of both engines.
+The $\pm 25$-cent conditions are the diagnostic ones: 25 cents falls **between** adjacent points of pYIN's 10-cent output lattice (§3A, Appendix J), whereas 50 cents falls on it.
+
+### 2. Full Quintet Microtonal Resolution
 
 | Instrument | Engine | +25c Shift | -25c Shift | +50c Shift | -50c Shift |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -1020,7 +1203,7 @@ The initial hypothesis posited a hybrid architecture: utilizing pYIN for high-re
 However, the full-dataset quantitative analysis fundamentally alters this recommendation based on two distinct operational metrics:
 
 **1. Macro-Yield Detection Stability (Appendix A)**
-The hypothesis that REAPER provided superior baseline detection on lower strings was invalidated by the transition to the Global DTW methodology. As shown in Appendix A, when temporal drift is mathematically prevented, **pYIN objectively outperforms REAPER in both baseline detection and inclusion yield across all string types** (Violin, Viola, and Cello). pYIN exhibits a significantly lower vulnerability to harmonic-tracking errors (e.g., octave confusion on the 2nd harmonic) compared to REAPER's epoch-based tracking.
+The hypothesis that REAPER provided superior baseline detection on lower strings was invalidated by the transition to the Global DTW methodology. As shown in Appendix A, when temporal drift is mathematically prevented, **pYIN outperforms REAPER in baseline detection yield across all three string types, and in inclusion yield on violin and cello**; on viola inclusion yield the two engines are effectively tied, with REAPER ahead by $0.62$ pp on the de-duplicated corpus. pYIN exhibits a significantly lower vulnerability to harmonic-tracking errors (e.g., octave confusion on the 2nd harmonic) compared to REAPER's epoch-based tracking.
 
 **2. Microtonal Precision & Grid Quantization (Appendix B)**
 Conversely, the expanded pitch modulation data identifies a mathematical constraint in pYIN regarding microtonal resolution: because its HMM evaluates pitch across a discrete grid of predefined frequency bins, off-grid microtonal shifts (like 25 cents) snap to the nearest bin, resulting in a consistent, mathematical error floor of **5.00 cents**. REAPER evaluates pitch in the continuous time domain. Consequently, **REAPER demonstrated a smaller absolute microtonal error (< 4 cents) than pYIN on every single instrument for off-grid microtonal intonation analysis.**
@@ -1095,9 +1278,9 @@ Following the patch, a full suite of pure-sine test signals was evaluated across
 
 ### Motivation
 
-The initial implementation of the DTW alignment engine inherited the `librosa.sequence.dtw` default step size condition $\Sigma_1 = \{(1, 0), (0, 1), (1, 1)\}$, which permits unlimited consecutive horizontal or vertical steps. As documented in Müller (2015, §3.2), this classical step pattern allows "degenerate" warping paths where a single frame in one sequence maps to an arbitrary number of consecutive frames in the other.
+The initial implementation of the DTW alignment engine inherited the `librosa.sequence.dtw` default step size condition $\Sigma_1 = \{(1, 0), (0, 1), (1, 1)\}$, which permits unlimited consecutive horizontal or vertical steps. As documented by Müller (2015, §3.2), this classical step pattern allows "degenerate" warping paths where a single frame in one sequence maps to an arbitrary number of consecutive frames in the other.
 
-The Subsequence DTW yield collapse documented in Section 6 (K515 Cello, $-40$ pp under `subseq=True`) was hypothesized to be partially driven by this unconstrained step flexibility — the path is free to "slide" along one axis without advancing the other, and small misalignments compound over time.
+The Subsequence DTW yield collapse documented in §6 (K515 Cello, $-40$ pp under `subseq=True`) was hypothesized to be partially driven by this unconstrained step flexibility — the path is free to "slide" along one axis without advancing the other, and small misalignments compound over time.
 
 Following a systematic review of the DTW chapter in Müller (2015), the step pattern was changed to the restricted variant $\Sigma_2 = \{(1, 1), (2, 1), (1, 2)\}$ with multiplicative weights $(w_d, w_h, w_v) = (2, 1, 1)$. This eliminates pure horizontal and vertical steps, constraining the local warping slope to $[\frac{1}{2}, 2]$ and preventing degenerate path segments.
 
@@ -1125,7 +1308,7 @@ The K515 quintet was chosen as the validation set because:
 | AuSep_5_vc | Cello | REAPER | 95.56% | **+4.73** | 76.94% | **+3.33** | +0.36 | +0.09 |
 | AuSep_5_vc | Cello | pYIN | 96.94% | **+3.33** | 83.89% | **+1.67** | +0.44 | −0.07 |
 
-*Deltas are relative to the $\Sigma_1$ baseline values from Appendix A. Positive $\Delta$ Det./Inc. = improvement (higher yield). Negative $\Delta$ Dev = improvement (lower deviation magnitude).*
+*Note.* Deltas are relative to the $\Sigma_1$ baseline, which is the corresponding K515 row of the Appendix A tables; each $\Sigma_2$ value above plus its delta reproduces that row exactly. Positive $\Delta$ Det./Inc. denotes improvement (higher yield); negative $\Delta$ Dev denotes improvement (smaller deviation magnitude).
 
 ### Summary Statistics
 
@@ -1139,19 +1322,19 @@ The K515 quintet was chosen as the validation set because:
 
 1. **Universal detected yield improvement.** Every single run showed a positive $\Delta$ in detected yield, ranging from $+0.48$ pp (Violin I, pYIN) to $+4.73$ pp (Cello, REAPER). The elimination of degenerate path segments means the warping path maps MIDI note boundaries to audio regions that more accurately contain the corresponding note, reducing NaN detection failures.
 
-2. **Largest gains on the K515 Cello.** The Cello track — previously identified as the most vulnerable to DTW alignment issues — showed the strongest improvement: $+4.73$ pp (REAPER) and $+3.33$ pp (pYIN) in detected yield, and $+3.33$ pp (REAPER) and $+1.67$ pp (pYIN) in included yield. This supports the hypothesis that the unconstrained $\Sigma_1$ step pattern contributed to the temporal drift documented in Section 6.
+2. **Largest gains on the K515 Cello.** The Cello track — previously identified as the most vulnerable to DTW alignment issues — showed the strongest improvement: $+4.73$ pp (REAPER) and $+3.33$ pp (pYIN) in detected yield, and $+3.33$ pp (REAPER) and $+1.67$ pp (pYIN) in included yield. This supports the hypothesis that the unconstrained $\Sigma_1$ step pattern contributed to the temporal drift documented in §6.
 
 3. **No regression in pitch accuracy.** The mean deviation across all 10 runs changed by only $-0.03$ Hz, confirming that the step pattern modification improves alignment quality without introducing systematic pitch measurement bias.
 
 ---
 
-## Appendix E: Synthetic Pitch Accuracy Validation
+## Appendix E: Synthetic Pitch Accuracy Validation (Metrological Baseline)
 
 This appendix documents the metrological validation of the pitch detection and intonation measurement pipeline using synthetic ground-truth signals. It establishes the systematic bias, precision, linearity, inter-engine agreement, and timbre robustness of the measurement instrument — the empirical foundation required before applying the tool to experimental data.
 
 ### Testing Methodology
 
-The validation framework (`validate_pitch_accuracy.py`) generates synthetic tones at mathematically known frequencies and cent offsets, processes them through the exact production code path (`extract_pitch_and_rms` → `analyze_intonation`), and compares measured results to ground truth. Five test suites are executed:
+The validation framework (`tests/scripts/validation/validate_pitch_accuracy.py`) generates synthetic tones at mathematically known frequencies and cent offsets, processes them through the exact production code path (`extract_pitch_and_rms` → `analyze_intonation`), and compares measured results to ground truth. Five test suites are executed:
 
 1. **Pitch Tracking Accuracy**: Raw pitch detection error across 20 frequencies (66–2000 Hz) spanning the full cello-to-violin range, tested on both pure sine tones and synthesized string-timbre tones with realistic bowed-string harmonic profiles ($1/n$ amplitude decay, odd harmonics boosted $1.3\times$, 12 partials).
 2. **Intonation Deviation Measurement**: Known cent offsets (0, $\pm 5$, $\pm 10$, $\pm 20$, $\pm 40$ cents) injected at four reference pitches (A3, D4, A4, E5), run through the full `analyze_intonation` pipeline including the Locked Target Rule, and compared to injected values.
@@ -1159,7 +1342,7 @@ The validation framework (`validate_pitch_accuracy.py`) generates synthetic tone
 4. **Inter-Engine Agreement**: Identical signals processed through both pYIN and REAPER, with Pearson correlation and mean absolute difference computed on the raw pitch error in cents.
 5. **String Timbre Robustness**: Paired comparison of absolute measurement error on pure sine vs. string-timbre tones at matched frequencies and offsets, with Wilcoxon signed-rank test for statistical significance.
 
-**Adaptive RMS Note:** The adaptive noise thresholding described in Section 4A (which raises the RMS gate to $2\times$ the 10th-percentile noise floor) is disabled for synthetic validation. A continuous synthetic tone contains no silence, causing the noise floor estimate to equal the signal level, which would mask all frames. This does not affect the validity of the pipeline validation, as the adaptive threshold functions correctly on real recordings where rests and ambient silence provide a meaningful noise floor estimate.
+**Adaptive RMS Note:** The adaptive noise thresholding described in §4A (which raises the RMS gate to $2\times$ the 10th-percentile noise floor) is disabled for synthetic validation. A continuous synthetic tone contains no silence, causing the noise floor estimate to equal the signal level, which would mask all frames. This does not affect the validity of the pipeline validation, as the adaptive threshold functions correctly on real recordings where rests and ambient silence provide a meaningful noise floor estimate.
 
 **Offset Boundary Note:** Test offsets are capped at $\pm 40$ cents rather than $\pm 50$ cents. At $\pm 50$ cents, the continuous MIDI value falls exactly on the semitone boundary ($\text{MIDI} \pm 0.50$), and `np.round` (banker's rounding) may assign the Locked Target to the adjacent semitone, producing a sign-flipped deviation. This is correct behavior of the Locked Target Rule at the ambiguity boundary and is not a measurement error.
 
@@ -1175,7 +1358,7 @@ Raw pitch detection error measured as $1200 \log_2(f_{\text{measured}} / f_{\tex
 | String | REAPER | −189.02 | 437.20 | 19 | 47% |
 
 > [!NOTE]
-> The string-timbre results (row 3) are the operationally relevant metrics, as real bowed-string recordings are harmonically rich. The elevated pYIN bias on pure sines (+6.77c) is caused by pYIN's internal 10-cent frequency binning — a known property of the probabilistic YIN algorithm documented by Mauch & Dixon (2014). Harmonic content in real instruments provides sub-bin pitch resolution, eliminating this quantization artifact. REAPER's poor synthetic performance is consistent with the three failure classes documented in Section 3B.
+> The string-timbre results (row 3) are the operationally relevant metrics, as real bowed-string recordings are harmonically rich. The elevated pYIN bias on pure sines (+6.77c) is caused by pYIN's internal 10-cent frequency binning — a known property of the probabilistic YIN algorithm documented by Mauch and Dixon (2014). Harmonic content in real instruments provides sub-bin pitch resolution, eliminating this quantization artifact. REAPER's poor synthetic performance is consistent with the three failure classes documented in §3B.
 
 ### 2. Intonation Deviation Measurement Accuracy
 
@@ -1225,7 +1408,7 @@ Raw pitch tracking error (cents) on identical signals processed through both pYI
 - **Mean Absolute Difference**: 11.25 cents
 - **Valid Pairs**: 15 of 20
 
-The low correlation is driven by REAPER's documented architectural limitations on synthetic signals (Section 3B). On real recorded audio from the URMP dataset, both engines produce convergent results on the same tracks (Appendix A), with the differences primarily driven by REAPER's harmonic-confusion exclusions rather than fundamental tracking disagreement.
+The low correlation is driven by REAPER's documented architectural limitations on synthetic signals (§3B). On real recorded audio from the URMP dataset, both engines produce convergent results on the same tracks (Appendix A), with the differences primarily driven by REAPER's harmonic-confusion exclusions rather than fundamental tracking disagreement.
 
 ### 5. String Timbre Robustness
 
@@ -1241,33 +1424,38 @@ Paired comparison of absolute measurement error: string timbre vs. pure sine at 
 
 | Metric | pYIN | REAPER | Criterion | Status |
 | :--- | :---: | :---: | :---: | :---: |
-| Tracking Bias | +0.52 c | −189.02 c | $|\text{bias}| < 5$ c | **PASS** / FAIL |
+| Tracking Bias | +0.52 c | −189.02 c | $\|\text{bias}\| < 5$ c | **PASS** / FAIL |
 | Tracking Precision | 2.65 c | 437.20 c | $\sigma < 5$ c | **PASS** / FAIL |
-| Deviation MAE | 2.33 c | — | MAE $< 5$ c | **PASS** |
+| Deviation MAE | 1.11 c (string); 2.33 c (sine) | — | MAE $< 5$ c | **PASS** |
 | Linearity Slope | 1.0001 | 1.0049 | $0.95$–$1.05$ | **PASS** / **PASS** |
 | Linearity $R^2$ | 0.9899 | 0.9274 | $> 0.99$ | MARGINAL / FAIL |
 | Inter-Engine $r$ | — | — | $> 0.95$ | FAIL (synthetic) / $r = 0.73$ (real audio) |
 | Timbre Degradation | +0.51 c | — | $< 3$ c | **PASS** |
 
 > [!NOTE]
-> **pYIN** passes all operationally critical criteria: tracking bias below 1 cent on string-timbre signals, precision under 3 cents, deviation MAE of 2.33 cents, and a linearity slope of exactly 1.0000 confirming zero measurement distortion. The marginal $R^2$ (0.990 vs. criterion 0.99) is attributable to pYIN's 10-cent frequency bin quantization at lower frequencies; the perfect slope confirms the deviation scale is linear.
+> **pYIN** passes all operationally critical criteria: tracking bias below 1 cent on string-timbre signals, precision under 3 cents, deviation MAE of 1.11 cents on string timbre (2.33 cents on pure sines), and a linearity slope of exactly 1.0000 confirming zero measurement distortion. The marginal $R^2$ (0.990 vs. criterion 0.99) is attributable to pYIN's 10-cent frequency bin quantization at lower frequencies; the perfect slope confirms the deviation scale is linear.
 >
-> **REAPER** failures on synthetic signals are consistent with the three documented architectural limitations (Section 3B) and do not reflect its performance on real recorded audio, where harmonic richness provides the epoch anchors the algorithm requires. REAPER's real-audio performance is documented in Appendix A.
+> **REAPER** failures on synthetic signals are consistent with the three documented architectural limitations (§3B) and do not reflect its performance on real recorded audio, where harmonic richness provides the epoch anchors the algorithm requires. REAPER's real-audio performance is documented in Appendix A.
 >
 > **Inter-engine agreement** is low on synthetic signals for the reasons above. Cross-engine comparison on real recordings (Appendix A) shows convergent results where both engines successfully detect the same notes, with differences primarily attributable to REAPER's higher harmonic-confusion exclusion rate rather than fundamental tracking disagreement.
 
-### 4A. Inter-Engine Agreement on Real Audio (URMP)
+---
 
-To formalize the cross-engine convergence observed in Appendix A, both pYIN and REAPER were run through the full production pipeline on all 58 bowed-string tracks in the URMP dataset (34 Violin, 13 Viola, 11 Cello) using Engine Optimal Default parameters (switch_prob=0.005, rms_threshold=0.005, min_frames=2/4 per engine, max_pitch_slope=0.50). Per-note `Deviation_Cents` results were paired by `Note_Index`; notes excluded by `is_note_excluded()` ($|\text{dev}| > 100$ cents or harmonic folding correction applied) or missed by either engine were dropped. The script `validate_inter_engine_agreement.py` implements this comparison.
+## Appendix F: Inter-Engine Agreement on Real Audio (URMP)
 
-#### Aggregate Results ($n = 9{,}299$ paired notes)
+> [!CAUTION]
+> **This appendix reports the one published confidence interval drawn from the pooled 58-stem corpus, and is the study most affected by de-duplication.** The 95% limits of agreement below are computed over $n = 9{,}299$ paired notes pooled across all 58 stems, of which 17 are reused takes (Appendix A). A duplicated stem contributes a *perfectly correlated* pair of observations, so pooling it twice inflates $n$ without adding information and **narrows the limits of agreement below their true width**. The bias and SD of differences are unbiased by the duplication — a duplicate carries identical values — but the interval is not. It should be read as a lower bound on the true width until regenerated on the 41-stem corpus. Unlike Appendix A, this cannot be fixed by recomputation: the per-note pairings are not archived.
+
+To formalize the cross-engine convergence observed in Appendix A, both pYIN and REAPER were run through the full production pipeline on all 58 bowed-string tracks in the URMP dataset (34 Violin, 13 Viola, 11 Cello) using Engine Optimal Default parameters (switch_prob=0.005, rms_threshold=0.005, min_frames=2/4 per engine, max_pitch_slope=0.50). Per-note `Deviation_Cents` results were paired by `Note_Index`; notes excluded by `is_note_excluded()` ($|\text{dev}| > 100$ cents or harmonic folding correction applied) or missed by either engine were dropped. The script `tests/scripts/validation/validate_inter_engine_agreement.py` implements this comparison.
+
+### Aggregate Results ($n = 9{,}299$ paired notes)
 
 - **Pearson $r$**: 0.7312 ($p \approx 0$)
 - **Mean Absolute Difference (MAD)**: 10.30 cents
 - **Bland-Altman bias** (pYIN $-$ REAPER): $-0.57$ cents
 - **95% Limits of Agreement**: $[-25.78, +24.65]$ cents
 
-#### Per-Instrument Breakdown
+### Per-Instrument Breakdown
 
 | Instrument | Tracks | Paired Notes | Median $r$ | Mean MAD (c) | Mean pYIN Yield | Mean REAPER Yield |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1276,7 +1464,7 @@ To formalize the cross-engine convergence observed in Appendix A, both pYIN and 
 | Cello | 11 | 1,724 | 0.8372 | 6.07 | 94.4% | 92.8% |
 
 > [!NOTE]
-> **Contrast with synthetic result:** The aggregate Pearson $r = 0.73$ on real audio is dramatically higher than the synthetic $r = 0.22$ (Section 4 above), confirming that REAPER's poor synthetic performance does not generalize to real recordings where harmonic richness provides reliable epoch anchors.
+> **Contrast with synthetic result:** The aggregate Pearson $r = 0.73$ on real audio is dramatically higher than the synthetic $r = 0.22$ (Appendix E, §4), confirming that REAPER's poor synthetic performance does not generalize to real recordings where harmonic richness provides reliable epoch anchors.
 >
 > **Near-zero bias:** The Bland-Altman bias of $-0.57$ cents indicates no systematic directional disagreement between engines — both track to essentially the same pitch center on average.
 >
@@ -1284,11 +1472,13 @@ To formalize the cross-engine convergence observed in Appendix A, both pYIN and 
 >
 > **Detection yield:** pYIN consistently achieves higher detection yield across all instruments (94–95%) compared to REAPER (87–94%), reflecting REAPER's greater sensitivity to harmonic interference. The yield gap is largest for Violin ($\Delta = 8.5$ percentage points) and smallest for Cello ($\Delta = 1.6$ pp).
 
-### Voicing Confidence Threshold Sensitivity Analysis
+---
 
-To confirm that the validation results above are not artifacts of a particular voicing probability threshold, the identical synthetic test signals were re-analysed at six confidence thresholds (0.0, 0.5, 0.6, 0.7, 0.8, 0.9). The confidence threshold filters frames where pYIN's voicing probability falls below the specified value. At threshold 0.0 (the default), no frames are filtered, reproducing the baseline results. The script `validate_confidence_sensitivity.py` implements this sweep.
+## Appendix G: Voicing Confidence Threshold Sensitivity
 
-#### Pitch Tracking Accuracy (String Timbre, pYIN)
+To confirm that the Appendix E results are not artifacts of a particular voicing probability threshold, the identical synthetic test signals were re-analyzed at six confidence thresholds (0.0, 0.5, 0.6, 0.7, 0.8, 0.9). The confidence threshold filters frames where pYIN's voicing probability falls below the specified value. At threshold 0.0 (the default), no frames are filtered, reproducing the baseline results. The script `tests/scripts/validation/validate_confidence_sensitivity.py` implements this sweep.
+
+### Pitch Tracking Accuracy (String Timbre, pYIN)
 
 | Threshold | Bias (cents) | Precision (cents) | n | Pass Rate |
 | :---: | :---: | :---: | :---: | :---: |
@@ -1299,7 +1489,7 @@ To confirm that the validation results above are not artifacts of a particular v
 | 0.8 | −0.21 | 2.80 | 13 | 100% |
 | 0.9 | +0.40 | 2.90 | 10 | 100% |
 
-#### Deviation Measurement Accuracy (String Timbre, pYIN)
+### Deviation Measurement Accuracy (String Timbre, pYIN)
 
 | Threshold | MAE (cents) | Max Error (cents) | Pass Rate | n |
 | :---: | :---: | :---: | :---: | :---: |
@@ -1317,17 +1507,19 @@ To confirm that the validation results above are not artifacts of a particular v
 >
 > For **REAPER**, voicing probability is synthesized as binary (1.0 for voiced, 0.0 for unvoiced), so any threshold $\le 1.0$ includes all voiced frames identically — the confidence threshold has no graded effect on REAPER results.
 
-### Slope Filter & Switch Probability Ablation
+---
 
-Two Engine Optimal Defaults depart from library convention and therefore require empirical defence: `max_pitch_slope` $= 0.50$ (an addition with no counterpart in pYIN) and `switch_prob` $= 0.005$ (half the librosa default of $0.01$). The physical and literature grounding for both is given in §3A and §4B; this section reports the ablation. The script `validate_slope_switchprob.py` implements the sweep.
+## Appendix H: Parameter Sensitivity I — Slope Filter and Switch Probability
 
-#### Testing Methodology
+Two of the Engine Optimal Defaults tabulated in §9 depart from library convention and therefore require empirical defense: `max_pitch_slope` $= 0.50$ (an addition with no counterpart in pYIN) and `switch_prob` $= 0.005$ (half the librosa default of $0.01$). The physical and literature grounding for both is given in §3A and §4B respectively; this appendix reports the ablation that tests them. The script `tests/scripts/validation/validate_slope_switchprob.py` implements the sweep.
+
+### Testing Methodology
 
 A full factorial grid of 6 `max_pitch_slope` values $\times$ 5 `switch_prob` values (30 combinations) was run through the complete production pipeline (extract → intonation filters → DTW alignment → harmonic folding → metrics) on real URMP audio. All other parameters were held at Engine Optimal Defaults (`rms_threshold` $= 0.005$, `min_frames` $= 2$, `reference_pitch_hz` $= 440.0$).
 
 The track subset is deterministic — the first five tracks of each instrument in sorted path order, 15 tracks total (2,326 included notes at the production setting) — rather than all 58, which would have required 1,740 pYIN extractions. Because `switch_prob` is consumed inside `librosa.pyin()` while `max_pitch_slope` is applied downstream, extraction was performed once per (track, `switch_prob`) pair and reused across all six slope values; the grid is exact, not interpolated.
 
-#### 1. Detection Yield (% of MIDI notes with non-NaN deviation)
+### 1. Detection Yield (% of MIDI notes with non-NaN deviation)
 
 | `max_pitch_slope` | $\beta = 0.001$ | $\beta = 0.005$ | $\beta = 0.01$ | $\beta = 0.02$ | $\beta = 0.05$ |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1338,7 +1530,7 @@ The track subset is deterministic — the first five tracks of each instrument i
 | 1.00 | 92.6 | 92.8 | 92.9 | 93.1 | 93.4 |
 | disabled | 92.6 | 92.8 | 92.9 | 93.1 | 93.4 |
 
-#### 2. Inclusion Yield (% of detected notes passing `is_note_excluded()`)
+### 2. Inclusion Yield (% of detected notes passing `is_note_excluded()`)
 
 | `max_pitch_slope` | $\beta = 0.001$ | $\beta = 0.005$ | $\beta = 0.01$ | $\beta = 0.02$ | $\beta = 0.05$ |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1349,7 +1541,7 @@ The track subset is deterministic — the first five tracks of each instrument i
 | 1.00 | 90.6 | 90.7 | 90.7 | 90.6 | 90.6 |
 | disabled | 90.6 | 90.6 | 90.6 | 90.5 | 90.5 |
 
-#### 3. Mean $|\text{Deviation\_Cents}|$ (included notes)
+### 3. Mean $|\text{Deviation\_Cents}|$ (included notes)
 
 | `max_pitch_slope` | $\beta = 0.001$ | $\beta = 0.005$ | $\beta = 0.01$ | $\beta = 0.02$ | $\beta = 0.05$ |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1361,11 +1553,11 @@ The track subset is deterministic — the first five tracks of each instrument i
 | disabled | 10.93 | 10.97 | 10.97 | 10.96 | 10.98 |
 
 > [!IMPORTANT]
-> **The median $|\text{Deviation\_Cents}|$ is not reportable at this resolution.** It takes exactly **one** distinct value — $10.00$ cents — across all 30 grid cells. `librosa.pyin()` quantises $f_0$ onto a grid of `resolution` $= 0.1$ semitones, so every deviation is a multiple of 10 cents and the median collapses onto that grid regardless of parameters. The **mean** is used as the accuracy axis throughout this section. This 10-cent quantisation is a property of the pitch engine, not of the parameters under test, and it bounds the resolution of any single-note deviation figure this system reports.
+> **The median $|\text{Deviation\_Cents}|$ is not reportable at this resolution.** It takes exactly **one** distinct value — $10.00$ cents — across all 30 grid cells. `librosa.pyin()` quantizes $f_0$ onto a grid of `resolution` $= 0.1$ semitones, so every deviation is a multiple of 10 cents and the median collapses onto that grid regardless of parameters. The **mean** is used as the accuracy axis throughout this section. This 10-cent quantization is a property of the pitch engine, not of the parameters under test, and it bounds the resolution of any single-note deviation figure this system reports.
 >
-> This behaviour is characterised in full, with a continuous-engine control, in "Distributional Statistics & the Quantization Resolution Floor" below.
+> This behavior is characterized in full, with a continuous-engine control, in Appendix J.
 
-#### 4. Slope Filter Rejection Rate
+### 4. Slope Filter Rejection Rate
 
 The fraction of voiced frame-to-frame transitions whose $|\Delta p_{midi}|$ exceeds $\theta_{slope}$, measured in isolation from the RMS, duration and DTW stages (values are averaged over $\beta$; the spread across $\beta$ is $\le 0.13$ pp):
 
@@ -1381,16 +1573,16 @@ The fraction of voiced frame-to-frame transitions whose $|\Delta p_{midi}|$ exce
 > [!NOTE]
 > This table is the central result. The rejection curve has a pronounced knee between $0.25$ and $0.50$: relaxing $0.25 \to 0.50$ recovers 2.8 pp of frames, whereas tightening $0.25 \to 0.10$ rejects an additional **13.8 pp**. That jump is exactly what §4B predicts from the vibrato physics — first-position violin vibrato peaks at $0.076$ st/frame and fifth-position at $0.228$ st/frame, so a threshold of $0.10$ cuts through the body of the vibrato distribution while $0.50$ sits above all of it. The $2.44\%$ rejected at $\theta_{slope} = 0.50$ is the tail the filter is designed to catch: harmonic-confusion glitches (an octave error is $12$ st/frame, $24\times$ the threshold) and the fastest note-transition slides.
 
-#### 5. Marginal Effects
+### 5. Marginal Effects
 
 Each parameter's total influence on the aggregate metrics, averaged over all levels of the other:
 
-| Parameter | Range swept | Detection yield range | Mean $|\text{dev}|$ range |
+| Parameter | Range swept | Detection yield range | Mean $\|\text{dev}\|$ range |
 | :--- | :---: | :---: | :---: |
 | `max_pitch_slope` | 0.10 → disabled | 0.56 pp | 0.39 c |
 | `switch_prob` | 0.001 → 0.05 (50$\times$) | 0.79 pp | 0.06 c |
 
-#### 6. Production Setting vs. Grid
+### 6. Production Setting vs. Grid
 
 At `max_pitch_slope` $= 0.50$, `switch_prob` $= 0.005$ the pipeline achieves **92.8% detection yield**, **91.0% inclusion yield**, and **10.89 cents** mean $|\text{dev}|$ over 2,326 included notes. Against the two relevant baselines:
 
@@ -1399,24 +1591,26 @@ At `max_pitch_slope` $= 0.50$, `switch_prob` $= 0.005$ the pipeline achieves **9
 | vs. librosa default $\beta = 0.01$ (same slope) | $-0.07$ pp | $+0.03$ pp | $+0.00$ c |
 | vs. slope filter disabled (same $\beta$) | $-0.04$ pp | $+0.35$ pp | $-0.08$ c |
 
-#### Overall Verdict
+### Overall Verdict
 
 > [!NOTE]
-> **`switch_prob` is not a confound.** Over a 50-fold sweep the metric moves by 0.79 pp of detection yield and 0.06 cents of mean deviation. The choice of $\beta = 0.005$ over the librosa default is therefore defensible on the grounds established in §3A — it is the principled setting for continuously-excited bowed tone — and is empirically *harmless*, but the data do not select it. No result elsewhere in this manual can be attributed to this parameter. What small monotone trend exists runs mildly in favour of higher $\beta$ ($+0.8$ pp yield at $\beta = 0.05$), which is noted here rather than suppressed.
+> **`switch_prob` is not a confound.** Over a 50-fold sweep the metric moves by 0.79 pp of detection yield and 0.06 cents of mean deviation. The choice of $\beta = 0.005$ over the librosa default is therefore defensible on the grounds established in §3A — it is the principled setting for continuously-excited bowed tone — and is empirically *harmless*, but the data do not select it. No result elsewhere in this manual can be attributed to this parameter. What small monotone trend exists runs mildly in favor of higher $\beta$ ($+0.8$ pp yield at $\beta = 0.05$), which is noted here rather than suppressed.
 >
 > **The slope filter earns its place, but not via the aggregate means.** Disabling it costs only $0.3$ pp of inclusion yield and $0.08$ cents of mean deviation — a small effect on the aggregate, because gross tracking errors are already caught downstream by harmonic folding and the 100-cent exclusion gate (§7). Its value is that it removes glitch frames *before* they contaminate each note's median $f_0$, and the rejection-rate table quantifies that it does so surgically: $2.44\%$ of transitions at $\theta_{slope} = 0.50$.
 >
-> **$\theta_{slope} = 0.50$ cannot be chosen by minimising deviation.** Mean $|\text{dev}|$ falls monotonically as the threshold tightens, reaching $10.54$ c at $\theta_{slope} = 0.10$ — but §4B establishes that a $0.10$ threshold clips first-position vibrato, and the $19.08\%$ rejection rate confirms it empirically. The apparent accuracy gain is measurement bias: the filter is discarding the outer excursions of legitimate vibrato, leaving a sample compressed toward each note's pitch centre and systematically understating the performer's true pitch variance. Selecting the threshold by optimising the metric would optimise the metric at the expense of its validity. $\theta_{slope} = 0.50$ is set from the gesture physics and *validated* here by confirming that neither yield nor accuracy collapses at that setting — detection yield is within $0.6$ pp of the grid maximum and mean deviation within $0.35$ c of the grid minimum.
+> **$\theta_{slope} = 0.50$ cannot be chosen by minimizing deviation.** Mean $|\text{dev}|$ falls monotonically as the threshold tightens, reaching $10.54$ c at $\theta_{slope} = 0.10$ — but §4B establishes that a $0.10$ threshold clips first-position vibrato, and the $19.08\%$ rejection rate confirms it empirically. The apparent accuracy gain is measurement bias: the filter is discarding the outer excursions of legitimate vibrato, leaving a sample compressed toward each note's pitch center and systematically understating the performer's true pitch variance. Selecting the threshold by optimizing the metric would optimize the metric at the expense of its validity. $\theta_{slope} = 0.50$ is set from the gesture physics and *validated* here by confirming that neither yield nor accuracy collapses at that setting — detection yield is within $0.6$ pp of the grid maximum and mean deviation within $0.35$ c of the grid minimum.
 >
 > **The engine is insensitive to both parameters within the plateau.** 27 of 30 cells fall within 1.0 pp of the best detection yield and 0.5 cents of the best mean deviation, including the production setting. Only $\theta_{slope} = 0.10$ at low $\beta$ falls outside, and it does so for the reason above.
 
-### Comprehensive Parameter Sensitivity
+---
 
-The three subsections above establish sensitivity results for `confidence_threshold` (synthetic tones), `max_pitch_slope` and `switch_prob` (URMP audio). This subsection sweeps the two remaining pipeline parameters — `rms_threshold` and `min_frames` — and then consolidates all five into a single robustness statement. The script `validate_rms_minframes.py` implements the sweep.
+## Appendix I: Parameter Sensitivity II — RMS Threshold and Minimum Sustain
 
-#### Testing Methodology
+Appendix G establishes sensitivity results for `confidence_threshold` (synthetic tones) and Appendix H for `max_pitch_slope` and `switch_prob` (URMP audio). This appendix sweeps the two remaining pipeline parameters — `rms_threshold` and `min_frames` — and then consolidates all five into a single robustness statement. The script `tests/scripts/validation/validate_rms_minframes.py` implements the sweep.
 
-A full factorial grid of 6 `rms_threshold` values $\times$ 5 `min_frames` values (30 combinations) was run through the complete production pipeline on real URMP audio, holding all other parameters at Engine Optimal Defaults (`max_pitch_slope` $= 0.50$, `switch_prob` $= 0.005$, `reference_pitch_hz` $= 440.0$). The track subset is identical to the slope/`switch_prob` ablation — the first five tracks of each instrument in sorted path order, 15 tracks total — so the two studies are directly comparable.
+### Testing Methodology
+
+A full factorial grid of 6 `rms_threshold` values $\times$ 5 `min_frames` values (30 combinations) was run through the complete production pipeline on real URMP audio, holding all other parameters at Engine Optimal Defaults (`max_pitch_slope` $= 0.50$, `switch_prob` $= 0.005$, `reference_pitch_hz` $= 440.0$). The track subset is identical to the Appendix H ablation — the first five tracks of each instrument in sorted path order, 15 tracks total — so the two studies are directly comparable.
 
 Both parameters are consumed **downstream** of `librosa.pyin()`, inside `analyze_intonation()`. Extraction was therefore performed exactly once per track and reused across all 30 cells (15 extractions rather than 450). This is a stronger caching position than the slope study, where `switch_prob` is consumed inside pyin itself and forced one extraction per (track, `switch_prob`) pair.
 
@@ -1431,9 +1625,9 @@ At the URMP sample rate of 48 kHz with `hop_length` $= 512$, the frame rate is 9
 >
 > $$\tau_{\text{eff}} = \max\left(\tau_{\text{nominal}},\ 2 \cdot P_{10}(\text{RMS})\right)$$
 >
-> The swept parameter is therefore only *binding* on tracks where it exceeds twice that track's 10th-percentile RMS; below that point the adaptive floor governs and the nominal value has no effect at all. Every cell below reports a **binding rate** — the percentage of the 15 tracks on which the nominal threshold is the operative one. This behaviour was not anticipated when the sweep was designed; it was discovered by instrumenting the effective threshold and materially changes how the results read.
+> The swept parameter is therefore only *binding* on tracks where it exceeds twice that track's 10th-percentile RMS; below that point the adaptive floor governs and the nominal value has no effect at all. Every cell below reports a **binding rate** — the percentage of the 15 tracks on which the nominal threshold is the operative one. This behavior was not anticipated when the sweep was designed; it was discovered by instrumenting the effective threshold and materially changes how the results read.
 
-#### 1. Detection Yield (% of MIDI notes with non-NaN deviation)
+### 1. Detection Yield (% of MIDI notes with non-NaN deviation)
 
 | `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1444,7 +1638,7 @@ At the URMP sample rate of 48 kHz with `hop_length` $= 512$, the frame rate is 9
 | 0.02 | 52.3 | 52.0 | 49.8 | 40.0 | 20.7 |
 | 0.05 | 8.7 | 8.3 | 7.4 | 5.0 | 2.3 |
 
-#### 2. Inclusion Yield (% of detected notes passing `is_note_excluded()`)
+### 2. Inclusion Yield (% of detected notes passing `is_note_excluded()`)
 
 | `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1455,7 +1649,7 @@ At the URMP sample rate of 48 kHz with `hop_length` $= 512$, the frame rate is 9
 | 0.02 | 92.2 | 92.3 | 92.2 | 91.4 | 89.7 |
 | 0.05 | 87.6 | 89.1 | 88.7 | 91.4 | 85.7 |
 
-#### 3. Mean $|\text{Deviation\_Cents}|$ (included notes)
+### 3. Mean $|\text{Deviation\_Cents}|$ (included notes)
 
 | `rms_threshold` | $m = 1$ | $m = 2$ | $m = 4$ | $m = 8$ | $m = 16$ |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -1469,11 +1663,11 @@ At the URMP sample rate of 48 kHz with `hop_length` $= 512$, the frame rate is 9
 Included-note counts fall from 2,388 (at $\tau = 0.001$, $m = 1$) to 205 (at $\tau = 0.05$, $m = 2$); the production cell holds 2,326.
 
 > [!IMPORTANT]
-> The median $|\text{Deviation\_Cents}|$ again takes exactly **one** distinct value — $10.00$ cents — across all 30 cells, reproducing the finding of the slope/`switch_prob` ablation. This is the 10-cent `resolution = 0.1` semitone quantisation of `librosa.pyin()`, not a property of the parameters under test. **Mean $|\text{dev}|$ is the accuracy axis throughout.** The P90 is likewise near-degenerate, sitting at $20$ cents in 23 of 30 cells and rising to $30$ only where the amplitude gate has destroyed most of the sample.
+> The median $|\text{Deviation\_Cents}|$ again takes exactly **one** distinct value — $10.00$ cents — across all 30 cells, reproducing the finding of the Appendix H ablation. This is the 10-cent `resolution = 0.1` semitone quantization of `librosa.pyin()`, not a property of the parameters under test. **Mean $|\text{dev}|$ is the accuracy axis throughout.** The P90 is likewise near-degenerate, sitting at $20$ cents in 23 of 30 cells and rising to $30$ only where the amplitude gate has destroyed most of the sample.
 >
-> The subsection "Distributional Statistics & the Quantization Resolution Floor" below closes this question: aggregating over a larger note population does not restore the median's resolution but removes what little it had, and a trimmed mean is identified as the robust statistic that survives the lattice.
+> Appendix J closes this question: aggregating over a larger note population does not restore the median's resolution but removes what little it had, and a trimmed mean is identified as the robust statistic that survives the lattice.
 
-#### 4. Filter-Action Diagnostics
+### 4. Filter-Action Diagnostics
 
 The direct action of each filter, measured in isolation from the DTW stage downstream. The RMS gate rate is the % of voiced frames removed by the amplitude gate; the binding rate is the % of tracks on which $\tau_{\text{nominal}}$ rather than the adaptive floor is operative. Both depend on $\tau$ only.
 
@@ -1500,16 +1694,16 @@ The duration filter's action — % of candidate note-islands destroyed for falli
 > [!NOTE]
 > The two diagnostics separate cleanly. The **amplitude gate is the dominant actor**: raising $\tau$ from $0.005$ to $0.05$ removes 96.5% of all voiced frames, and detection yield collapses with it. The **duration filter is comparatively gentle at the production setting**: $m = 2$ destroys 7.8% of candidate islands but costs only $0.33$ pp of detection yield, because the islands it destroys are one-frame fragments (10.7 ms) that rarely carry a note's median $f_0$ on their own. The destruction rate rises with $\tau$ at high $m$ (78.8% at $\tau = 0.05$, $m = 16$) because an aggressive amplitude gate fragments continuous notes into short islands, which the duration filter then removes — the two filters interact, and that interaction is what makes the far corner of the grid collapse.
 
-#### 5. Marginal Effects
+### 5. Marginal Effects
 
-| Parameter | Range swept | Detection yield range | Mean $|\text{dev}|$ range |
+| Parameter | Range swept | Detection yield range | Mean $\|\text{dev}\|$ range |
 | :--- | :---: | :---: | :---: |
 | `rms_threshold` | 0.001 → 0.05 (50$\times$) | **87.10 pp** | 2.92 c |
 | `rms_threshold` | 0.001 → 0.005 (working range) | 4.26 pp | 0.29 c |
 | `min_frames` | 1 → 16 | 16.48 pp | 1.49 c |
 | `min_frames` | 1 → 8 (working range) | 5.08 pp | 0.61 c |
 
-#### 6. Production Setting vs. Grid
+### 6. Production Setting vs. Grid
 
 At `rms_threshold` $= 0.005$, `min_frames` $= 2$ the pipeline achieves **92.8% detection yield**, **91.0% inclusion yield**, and **10.89 cents** mean $|\text{dev}|$ over 2,326 included notes, with the nominal threshold binding on 60% of tracks (mean effective threshold $0.00641$).
 
@@ -1525,11 +1719,11 @@ At `rms_threshold` $= 0.005$, `min_frames` $= 2$ the pipeline achieves **92.8% d
 >
 > The mechanism is the adaptive floor, not the nominal value. At $\tau \le 0.0025$ the nominal threshold binds on 0–7% of tracks, so those cells are measuring the adaptive floor $2 \cdot P_{10}(\text{RMS})$ operating alone. The finding is therefore best stated as: **on URMP, the adaptive floor is a better amplitude gate than a fixed $0.005$**, and the fixed value only does harm on the 60% of tracks where it overrides the floor. This does not license changing the default without further work — the sweep covers 15 tracks of one dataset, and a lower gate admits more low-amplitude frames whose exclusion may be desirable on noisier recordings — but it is a live finding and is recorded as such rather than reconciled to the current default.
 
-#### 7. Consolidated Five-Parameter Robustness
+### 7. Consolidated Five-Parameter Robustness
 
 All five pipeline parameters, with the span each induces across its swept range:
 
-| Parameter | Range swept | Detection yield span | Mean $|\text{dev}|$ span | Verdict |
+| Parameter | Range swept | Detection yield span | Mean $\|\text{dev}\|$ span | Verdict |
 | :--- | :---: | :---: | :---: | :--- |
 | `switch_prob` | 0.001 → 0.05 (50$\times$) | 0.79 pp | 0.06 c | **Robust** — effectively inert |
 | `max_pitch_slope` | 0.10 → disabled | 0.56 pp | 0.39 c | **Robust** on aggregates |
@@ -1539,7 +1733,7 @@ All five pipeline parameters, with the span each induces across its swept range:
 
 The `confidence_threshold` sweep was run on synthetic tones rather than URMP audio and reports tone-level pass rate rather than note detection yield, so its yield column is not directly comparable; the measured result there was a 100% pass rate maintained through threshold 0.8 with deviation MAE invariant at 1.11 cents, tracking bias within $\pm 0.52$ cents and precision 2.54–2.90 cents throughout.
 
-#### Overall Verdict
+### Overall Verdict
 
 > [!NOTE]
 > **Four of the five parameters are not load-bearing; one is.** `switch_prob`, `max_pitch_slope` and `confidence_threshold` each move the aggregate metrics by less than 1 percentage point of yield and less than half a cent of mean deviation across sweeps spanning 50-fold ranges or filter-disabled endpoints. `min_frames` is flat from 1 to 8 (5.08 pp, 0.61 c) and only breaks at $m = 16$, where the 170.7 ms floor exceeds the duration of ordinary passagework. **No conclusion reported anywhere in this manual can be attributed to the choice of these four parameters.** That is the substantive robustness claim, and it now rests on measured factorial sweeps rather than assertion.
@@ -1548,13 +1742,15 @@ The `confidence_threshold` sweep was run on synthetic tones rather than URMP aud
 >
 > **Two caveats are carried forward rather than resolved.** First, the adaptive noise floor means the nominal `rms_threshold` is inert on 40% of URMP tracks at the default, and the sweep shows the floor alone outperforming the fixed value — a Pareto improvement of $+2.90$ pp yield and $-0.20$ c mean deviation is available at $\tau = 0.0025$ and has not been adopted pending validation on a second corpus. Second, the apparent accuracy *gain* at aggressive settings ($10.37$ c mean at $\tau = 0.05$, $m = 16$, versus $10.89$ c at production) is the same selection artefact identified for $\theta_{slope} = 0.10$ above: those cells retain only 54 of 2,326 included notes, and what survives an aggressive gate is the loud, stable, well-tuned core of each note. Optimising mean deviation over this grid would select a configuration that measures almost nothing very accurately.
 
-### Distributional Statistics & the Quantization Resolution Floor
+---
 
-Every summary reported by this system up to this point has been a **mean**, usually with a standard deviation. That pairing is a complete description of a sample only when the sample is normally distributed, and no evidence had been offered that these samples are. This subsection tests the assumption, reports the robust and shape statistics a non-normal distribution requires, and resolves a measurement-resolution problem that surfaced twice in the ablations above. The script `validate_distribution_stats.py` implements the study.
+## Appendix J: Distributional Statistics and the Quantization Resolution Floor
 
-#### Testing Methodology
+Every summary reported by this system up to this point has been a **mean**, usually with a standard deviation. That pairing is a complete description of a sample only when the sample is normally distributed, and no evidence had been offered that these samples are. This appendix tests the assumption, reports the robust and shape statistics a non-normal distribution requires, and resolves a measurement-resolution problem that surfaced twice in the ablations above. The script `tests/scripts/validation/validate_distribution_stats.py` implements the study.
 
-Both engines ran the full production pipeline at Engine Optimal Default parameters over the same deterministic 15-track URMP subset used by the slope/`switch_prob` and `rms`/`min_frames` ablations, so all three studies are directly comparable. Notes excluded by `is_note_excluded()` are dropped, matching the production summary. Three samples are analysed:
+### Testing Methodology
+
+Both engines ran the full production pipeline at Engine Optimal Default parameters over the same deterministic 15-track URMP subset used by the Appendix H and Appendix I ablations, so all three studies are directly comparable. Notes excluded by `is_note_excluded()` are dropped, matching the production summary. Three samples are analyzed:
 
 | Sample | What it is | $n$ |
 | :--- | :--- | :---: |
@@ -1564,9 +1760,9 @@ Both engines ran the full production pipeline at Engine Optimal Default paramete
 
 **REAPER is the control.** It estimates pitch in the continuous time domain and has no output lattice (§3B). Any degeneracy that appears in the pYIN order statistics but not in REAPER's is therefore caused by the pYIN encoder, not by the music. This design is what converts a suspicion into a measurement.
 
-The nominal `rms_threshold` binds on 9 of 15 tracks (60%); on the remainder the adaptive noise floor of §4A governs, with effective thresholds up to $0.0181$. The effective value is instrumented rather than assumed, for the reasons given in the "Comprehensive Parameter Sensitivity" callout above.
+The nominal `rms_threshold` binds on 9 of 15 tracks (60%); on the remainder the adaptive noise floor of §4A governs, with effective thresholds up to $0.0181$. The effective value is instrumented rather than assumed, for the reasons given in the callout in Appendix I.
 
-#### 1. The Deviation Distributions Are Not Normal
+### 1. The Deviation Distributions are Not Normal
 
 | Statistic (cents) | pYIN | REAPER | pYIN frames |
 | :--- | :---: | :---: | :---: |
@@ -1580,19 +1776,31 @@ The nominal `rms_threshold` binds on 9 of 15 tracks (60%); on the remainder the 
 | D'Agostino–Pearson $p$ | $2.1 \times 10^{-94}$ | $5.9 \times 10^{-13}$ | $< 10^{-300}$ |
 
 > [!IMPORTANT]
-> **The tails are the finding, and they justify the whole exercise.** Excess kurtosis is $+4.81$ on per-note pYIN deviations and $+14.51$ at frame level, against $0$ for a Gaussian. These distributions have far more extreme values than a normal distribution of the same standard deviation would produce, which is precisely the condition under which "mean $\pm$ SD" stops describing a typical note: the SD is inflated by a small population of large excursions, and the interval $\bar{x} \pm \sigma$ neither contains the stated fraction of the data nor characterises ordinary playing. The frame-level sample is the more extreme because per-note medians average the outliers away before the DTW summary ever sees them — the DTW mode is, in this specific sense, already partially robust.
+> **The tails are the finding, and they justify the whole exercise.** Excess kurtosis is $+4.81$ on per-note pYIN deviations and $+14.51$ at frame level, against $0$ for a Gaussian. These distributions have far more extreme values than a normal distribution of the same standard deviation would produce, which is precisely the condition under which "mean $\pm$ SD" stops describing a typical note: the SD is inflated by a small population of large excursions, and the interval $\bar{x} \pm \sigma$ neither contains the stated fraction of the data nor characterizes ordinary playing. The frame-level sample is the more extreme because per-note medians average the outliers away before the DTW summary ever sees them — the DTW mode is, in this specific sense, already partially robust.
 >
 > The formal $p$-values are reported for completeness only. At $n$ in the thousands any normality test rejects on a trivial departure, so the **effect sizes** carry the argument, not the significance.
 
+**Figure J1**
+
+*Deviation Distributions Against a Fitted Normal*
+
 ![Deviation Distributions vs Normal](images/deviation_distribution.png)
+
+*Note.* Left: overlaid histograms of per-note deviation for pYIN (blue) and REAPER (orange). Right: the pYIN sample against a normal density fitted to its own mean and standard deviation.
 
 The right panel is the argument in one image: the observed pYIN distribution is far more sharply peaked than the fitted normal of the same mean and standard deviation, with the excess mass reappearing in the tails. The left panel already previews the next finding — the blue pYIN histogram is a **comb**, with tall bars on multiples of 10 cents and near-empty bars between them, while the orange REAPER histogram is smooth.
 
+**Figure J2**
+
+*Normal Quantile–Quantile Plots for the Three Samples*
+
 ![Normal Q-Q Plots](images/deviation_qq.png)
+
+*Note.* Departure from the reference line at both extremes indicates heavy tails; flat treads indicate values pinned to the encoder lattice.
 
 The Q-Q plots separate the two effects cleanly. All three samples depart from the reference line at both ends, which is the heavy-tail signature. Only the pYIN panels additionally show a **staircase** — flat treads where many notes share one lattice value — and REAPER, run on the same repertoire under the same filters, shows a smooth continuum. That contrast is the subject of the next section.
 
-#### 2. The Resolution Floor
+### 2. The Resolution Floor
 
 `librosa.pyin()` decodes $f_0$ on a grid of `resolution` $= 0.1$ semitones. Because the instrument `fmin` values of §2 are exact integer MIDI notes, that grid lands on integer-MIDI $+\ 0.1k$, so every **frame** deviation is an exact multiple of $10$ cents. A DTW **per-note** deviation is the median of those frames, which halves the step to $5$ cents on even-sized note islands. Measured directly:
 
@@ -1602,14 +1810,14 @@ The Q-Q plots separate the two effects cleanly. All three samples depart from th
 | REAPER (per-note) | 5.0 c | **395** | **0.0%** | 2.491 c | 4.74 |
 | pYIN (frame) | 10.0 c | **48** | **100.0%** | 0.000 c | 2.00 |
 
-The control behaves exactly as predicted. On statistically comparable data — 2,140 notes against 2,326, the same repertoire under the same filters — REAPER produces **395** distinct deviation values while pYIN produces **29**, a ratio of nearly $14:1$, and not one REAPER value falls on the lattice. The entire measured intonation behaviour of fifteen string performances is being expressed by pYIN in 29 possible numbers.
+The control behaves exactly as predicted. On statistically comparable data — 2,140 notes against 2,326, the same repertoire under the same filters — REAPER produces **395** distinct deviation values while pYIN produces **29**, a ratio of nearly $14:1$, and not one REAPER value falls on the lattice. The entire measured intonation behavior of fifteen string performances is being expressed by pYIN in 29 possible numbers.
 
 > [!NOTE]
 > **Distinct values are counted after rounding to 4 decimal places.** Deviations reach cents through a $\text{Hz} \rightarrow \text{MIDI} \rightarrow \text{cents}$ chain in float64, so two results representing the same decoded pitch can differ in the last few bits. Counting raw floating-point equality inflates this column with representation noise instead of measuring the encoder — it reports 73, 449 and 128 for the three rows above, more than double the true figures for the pYIN samples. The distinction matters precisely because this column is the evidence, so it is measured rather than taken from a naive `unique()`.
 
-#### 3. Aggregation Does Not Rescue the Median — It Makes the Pinning Worse
+### 3. Aggregation Does Not Rescue the Median — It Makes the Pinning Worse
 
-The open question carried forward from the two ablations above was whether medians and IQRs computed over a *large* note population escape the degeneracy seen in individual grid cells. They do not, and the reasoning runs opposite to the intuition. The sampling error of a median is approximately $1.253\,\sigma/\sqrt{n}$. While that error exceeds the lattice step, resampling can land the median on different grid points; once $\sqrt{n}$ drives it below the step, **every** resample returns the same grid point. Growing the sample makes the median more perfectly stuck, not less.
+The open question carried forward from the two ablations of Appendices H and I was whether medians and IQRs computed over a *large* note population escape the degeneracy seen in individual grid cells. They do not, and the reasoning runs opposite to the intuition. The sampling error of a median is approximately $1.253\,\sigma/\sqrt{n}$. While that error exceeds the lattice step, resampling can land the median on different grid points; once $\sqrt{n}$ drives it below the step, **every** resample returns the same grid point. Growing the sample makes the median more perfectly stuck, not less.
 
 Subsamples drawn from the pYIN note population, median re-estimated 200 times at each size:
 
@@ -1629,11 +1837,11 @@ Subsamples drawn from the pYIN note population, median re-estimated 200 times at
 > [!IMPORTANT]
 > **On pYIN data the median and the IQR are not measurements.** Both have confidence intervals of exactly zero width — they are labels for a lattice cell, and quoting them to two decimal places implies a precision the encoder cannot deliver. REAPER's median and IQR, computed on the same repertoire under the same filters, carry ordinary non-degenerate intervals, which confirms that the cause is the encoder rather than the music or the sample size.
 >
-> This supersedes and explains the two earlier observations in this appendix that the median $|\text{Deviation\_Cents}|$ took the single value $10.00$ across all 30 cells of both ablation grids. That was not a coincidence of those parameter ranges; it is the general behaviour of any order statistic computed on this engine's output.
+> This supersedes and explains the observations in Appendices H and I that the median $|\text{Deviation\_Cents}|$ took the single value $10.00$ across all 30 cells of both ablation grids. That was not a coincidence of those parameter ranges; it is the general behavior of any order statistic computed on this engine's output.
 
-#### 4. Resolution: the Trimmed Mean
+### 4. Resolution: the Trimmed Mean
 
-The two findings above are in tension. §1 establishes that the distributions are heavy-tailed, which argues for a robust estimator in place of the mean. §3 establishes that the robust estimators normally reached for — median, quartiles, IQR — are *order statistics*, and on a quantized encoder they can only ever return a lattice value. The statistic that satisfies both constraints at once is the **symmetrically trimmed mean**: it discards a fixed proportion of each tail, so it is robust, but it then *averages* the surviving values, so it dithers off the lattice exactly as the ordinary mean does and retains full resolution.
+The two findings above are in tension. Section 1 of this appendix establishes that the distributions are heavy-tailed, which argues for a robust estimator in place of the mean. Section 3 establishes that the robust estimators normally reached for — median, quartiles, IQR — are *order statistics*, and on a quantized encoder they can only ever return a lattice value. The statistic that satisfies both constraints at once is the **symmetrically trimmed mean**: it discards a fixed proportion of each tail, so it is robust, but it then *averages* the surviving values, so it dithers off the lattice exactly as the ordinary mean does and retains full resolution.
 
 Measured on the same samples, with 10% trimmed from each tail:
 
@@ -1643,23 +1851,23 @@ Measured on the same samples, with 10% trimmed from each tail:
 | REAPER | $+1.41$ $[-0.51, +1.41]$ | $+0.79$ $[+0.04, +1.58]$ | $+0.29$ $[-0.47, +1.09]$ |
 | pYIN frames | $+0.00$ $[+0.00, +0.00]$ | $+1.75$ $[+1.63, +1.88]$ | $+2.10$ $[+1.91, +2.30]$ |
 
-The contrast is direct and on identical data: pYIN's median has an interval of width $0$ cents, while its trimmed mean has an interval of width $1.23$ cents — a genuine, reportable measurement of central tendency. The trimmed mean also sits *below* the ordinary mean in every pYIN sample ($+1.38$ vs $+1.74$ per-note; $+1.75$ vs $+2.10$ per-frame), which is the expected consequence of discarding the positively-skewed tail identified in §1.
+The contrast is direct and on identical data: pYIN's median has an interval of width $0$ cents, while its trimmed mean has an interval of width $1.23$ cents — a genuine, reportable measurement of central tendency. The trimmed mean also sits *below* the ordinary mean in every pYIN sample ($+1.38$ vs $+1.74$ per-note; $+1.75$ vs $+2.10$ per-frame), which is the expected consequence of discarding the positively skewed tail identified in Section 1 of this appendix.
 
 > [!NOTE]
 > **What this system should report, and why.**
 >
-> - The **mean** is unaffected by the resolution floor — a sum over many lattice values dithers off the grid — but §1 shows it is not representative of a typical note.
+> - The **mean** is unaffected by the resolution floor — a sum over many lattice values dithers off the grid — but Section 1 of this appendix shows it is not representative of a typical note.
 > - The **median and IQR** are representative but, on pYIN, unresolvable. They are still reported: a reader expects them, and their degeneracy is itself a property of the engine worth stating. They must not be read to two decimals.
 > - The **10%-trimmed mean** is both. It is the figure to quote when a single robust location estimate is wanted from pYIN data.
 > - **Skewness and kurtosis** are moment-based, not order-based, so they are unaffected by the lattice and are fully reportable at both frame and note level.
 >
 > These four statements are implemented directly: `src/stats_summary.py` computes all of them, and both the Legacy and DTW summary panels in the application display the full set with the resolution caveat attached.
 
-#### 5. Bland–Altman Agreement (pYIN vs REAPER)
+### 5. Bland–Altman Agreement (pYIN vs. REAPER)
 
-The inter-engine study of §4A above reported a Pearson $r$ of $0.7312$ across all 58 tracks. Correlation answers "do the two engines rank notes in the same order?", which is not the question a method comparison asks. The question is "by how much can they disagree about any one note?", and the statistic that answers it is the 95% limits of agreement.
+The inter-engine study of Appendix F reported a Pearson $r$ of $0.7312$ across all 58 tracks. Correlation answers "do the two engines rank notes in the same order?", which is not the question a method comparison asks. The question is "by how much can they disagree about any one note?", and the statistic that answers it is the 95% limits of agreement.
 
-| Statistic | This study (15 tracks) | §4A (58 tracks) |
+| Statistic | This study (15 tracks) | Appendix F (58 tracks) |
 | :--- | :---: | :---: |
 | Paired notes | 2,066 | 9,299 |
 | Bias (pYIN $-$ REAPER) | $+0.70$ c | $-0.57$ c |
@@ -1671,18 +1879,32 @@ The inter-engine study of §4A above reported a Pearson $r$ of $0.7312$ across a
 >
 > The **width** of the limits is the substantive finding, and it is a caution rather than a reassurance: the two engines can disagree by roughly $\pm 25$ cents — a quarter-semitone — on an individual note, even though they agree almost perfectly on average. Aggregate conclusions in this manual are robust to the choice of engine; **single-note claims are not**, and should not be made from one engine's output alone.
 
+**Figure J3**
+
+*Bland–Altman Agreement Between pYIN and REAPER*
+
 ![Bland-Altman: pYIN vs REAPER](images/bland_altman_pyin_reaper.png)
+
+*Note.* Per-note difference (pYIN − REAPER) against the mean of the two estimates, with bias and 95% limits of agreement overlaid. $n = 2{,}066$ paired notes.
 
 The diagonal striping visible in the scatter is a further trace of the pYIN lattice: with the difference on one axis and the pair mean on the other, a quantized $x$-coordinate maps every note onto one of a family of parallel lines.
 
-#### 6. Duplicate Audio in the Shared Track Subset
+### 6. Duplicate Audio in the Shared Track Subset
 
-Instrumenting the subset by content hash revealed that **2 of the 15 stems are byte-identical to another stem**. URMP reuses one recorded take across pieces that differ only in another part: `24_Pirates` and `25_Pirates` share a single viola take, as do `26_King` and `27_King`.
+Instrumenting the subset by content hash revealed that **2 of the 15 stems are byte-identical to another stem**. URMP reuses one recorded take across pieces that differ only in another part: `24_Pirates` and `25_Pirates` share a single viola take, as do `26_King` and `27_King`. This is the measurement that established the reused-take structure declared in Appendix A.
+
+> [!CAUTION]
+> **This subset no longer exists, and the count of 2 was itself an undercount.** Both statements are superseded by the de-duplication protocol of Appendix A. Two corrections apply:
+>
+> 1. **The subset contained 3 reused stems, not 2 — leaving 12 unique, not 13.** `AuSep_3_vc_20_Pavane` is the same take as `AuSep_3_vc_19_Pavane`, differing by $\le 1$ LSB at 24-bit. It is not byte-identical, so the content hash used here did not flag it, and the de-duplicated column below still double-counts it. The de-duplicated figures are therefore *closer* to a clean estimate than the pooled ones but are not themselves clean.
+> 2. **The subset is defined by a selection rule, not a fixed list** — "first 5 tracks per instrument in sorted path order" — evaluated over the dataset directory at run time. Because seven piece folders have since been removed, the same rule now selects a different 15 tracks: `AuSep_3_va_25_Pirates`, `AuSep_3_va_27_King` and `AuSep_3_vc_20_Pavane` are replaced by `AuSep_3_va_32_Fugue`, `AuSep_3_va_36_Rondeau` and `AuSep_4_vc_24_Pirates`. The three incoming tracks have never been analysed under this appendix's code path.
+>
+> Consequently the tables in §1–§5 of this appendix, and the ablations of Appendices H and I that share the subset, **cannot be reproduced by re-running their scripts against the current dataset** — the scripts will silently analyse a different subset and return different numbers. They are retained as results on the superseded corpus. Regenerating them requires an actual re-run, not a recomputation from archived per-track output, because three of the fifteen tracks are new.
 
 > [!IMPORTANT]
 > **This affects the results of the two ablation studies above, which use the same subset.** The duplicated notes are counted twice in every pooled statistic. This does **not** bias any location estimate — the duplicate carries identical values, so means, medians and yields are unchanged — but it inflates $n$ and therefore understates every standard error and confidence interval derived from the pooled population. Roughly 636 of the 2,326 included notes come from the two duplicated pairs.
 >
-> The effect on the ablations of the preceding two subsections is nil for the reported quantities, which are all yields and means rather than intervals. It matters here because this subsection reports confidence intervals, and it is recorded so that any future study using this subset accounts for it rather than rediscovering it.
+> The effect on the ablations of Appendices H and I is nil for the reported quantities, which are all yields and means rather than intervals. It matters here because this appendix reports confidence intervals, and it is recorded so that any future study using this subset accounts for it rather than rediscovering it.
 
 A de-duplicated statistic set is computed alongside the pooled one:
 
@@ -1696,9 +1918,9 @@ A de-duplicated statistic set is computed alongside the pooled one:
 | On-lattice fraction | 95.9% | 96.1% |
 
 > [!NOTE]
-> **Every qualitative conclusion of this subsection survives de-duplication.** The distribution remains strongly non-normal (G2 rises slightly, from $+4.81$ to $+5.15$), the lattice fraction is unchanged at ~96%, and the median remains pinned at $+0.00$ with a zero-width interval. The location estimates do shift by about $1.7$ cents — the two duplicated stems happen to be better-tuned than the corpus average, so removing their double-weighting raises the mean — which is a reminder that the 15-track subset is small enough for individual tracks to move an aggregate, and that these figures characterise the *measurement instrument*, not the URMP corpus.
+> **Every qualitative conclusion of this appendix survives de-duplication.** The distribution remains strongly non-normal (G2 rises slightly, from $+4.81$ to $+5.15$), the lattice fraction is unchanged at ~96%, and the median remains pinned at $+0.00$ with a zero-width interval. The location estimates do shift by about $1.7$ cents — the two duplicated stems happen to be better-tuned than the corpus average, so removing their double-weighting raises the mean — which is a reminder that the 15-track subset is small enough for individual tracks to move an aggregate, and that these figures characterize the *measurement instrument*, not the URMP corpus.
 
-#### Overall Verdict
+### Overall Verdict
 
 > [!NOTE]
 > **The mean-and-SD summary was insufficient, and is now supplemented rather than replaced.** Both deviation distributions are demonstrably non-normal, with excess kurtosis of $+4.81$ per-note and $+14.51$ per-frame. Median, IQR, skewness and kurtosis are now computed and displayed in both Legacy and DTW modes, in cents and in Hertz, alongside distribution and Bland–Altman plots.
@@ -1706,3 +1928,45 @@ A de-duplicated statistic set is computed alongside the pooled one:
 > **The open question from the earlier ablations is closed, with the answer that was not expected.** Aggregating over a large note population does not make the median meaningful; it pins it harder, because the sampling error falls below the lattice step. On pYIN data the median and IQR have zero-width bootstrap intervals and must be read as lattice labels, not measurements. The REAPER control confirms the encoder as the cause.
 >
 > **A usable robust statistic exists and is now reported.** The 10%-trimmed mean is robust to the heavy tails *and* immune to the resolution floor, because it averages rather than selects. It is the recommended single-figure summary for pYIN intonation data, and the resolution floor is documented wherever an order statistic is displayed.
+
+---
+
+## Appendix K: Perceptual Resolution and the Absence of Criterion Validity
+
+Every appendix before this one validates the engine against a standard the engine's own designers chose. Appendices E and G compare it to synthesized tones of exactly known frequency. Appendices A and D compare it to a MIDI score. Appendices B, F and H–J compare it to a second configuration of itself. Each is a necessary check, and none of them establishes that a deviation the system prints as $-38$ cents is one a trained string player would hear as flat.
+
+That is a real gap, and this appendix states it rather than closing it. What can be established from the evidence already in hand is the weaker but still useful claim below.
+
+### 1. The Resolution Argument
+
+An instrument is fit to measure a quantity only if it resolves more finely than the distinctions being made with it. On that criterion the engine is comfortably adequate.
+
+| Quantity | Value | Source |
+| :--- | :---: | :--- |
+| Engine measurement precision, string timbre (pYIN) | $2.65$ cents | Appendix E, §1 |
+| Engine systematic bias, string timbre (pYIN) | $+0.52$ cents | Appendix E, §1 |
+| Human frequency discrimination, successive complex tones | order of $5$–$10$ cents | Moore (2012) |
+
+The engine's precision sits below even the optimistic end of the human range, by a factor of roughly two at $5$ cents and roughly four at $10$ cents. The inequality therefore holds whichever end of the published range is taken, which is what makes the argument robust: it does not depend on settling the exact value of a perceptual threshold that varies with training, register, duration and presentation.
+
+> [!NOTE]
+> **What this establishes.** Any intonation difference the engine reports as real is a difference a trained listener could in principle hear, and conversely the engine does not fail to resolve distinctions that a listener can make. The measurement is not the limiting factor in any comparison between the system and an ear.
+>
+> **What this does not establish.** It says nothing about whether the engine's *judgements* coincide with a listener's. Sufficient resolution is a necessary condition for criterion validity, not a demonstration of it. A perfectly precise instrument can still be measuring the wrong thing, or measuring the right thing against the wrong reference — and the engine's reference is equal temperament at $A = 440$, which is not what a performer tunes to in ensemble (§5, and the reference-pitch parameter of §9 exists precisely because that reference is a choice).
+
+### 2. What Criterion Validation Would Require
+
+Stated so that the gap is a specified piece of future work rather than an open-ended one. A criterion validity study would need:
+
+* A stratified sample of roughly $60$–$80$ notes drawn from the URMP string stems, spanning the deviation range — near-zero, $\pm 10$–$20$ c, $\pm 20$–$40$ c and $> 50$ c — balanced across violin, viola and cello and across sign, and drawn from **de-duplicated** stems (§1 of Appendix A).
+* Blind presentation in randomized order, level-normalized so loudness cannot cue the response, each note preceded by a reference tone at the notated pitch — a listener cannot judge an isolated note as flat or sharp without a referent, which is the pitch-matching arrangement of Geringer et al. (2014).
+* Three or more string faculty rating each note flat / in-tune / sharp, blind to the engine and to each other.
+* Fleiss' $\kappa$ for inter-rater agreement computed **first**, since if the panel does not agree with itself there is no criterion for the engine to be measured against; then rater-versus-engine agreement, and the correlation between `Deviation_Cents` and the mean rater response.
+* Location estimates reported as the $10\%$ trimmed mean. Medians and quartiles are inadmissible on pYIN output for the reason given in Appendix J.
+
+The comparison also requires an in-tune half-band, which the engine does not itself define, and any such band must avoid the multiples of $5$ cents that constitute the per-note pYIN lattice — otherwise a whole lattice cell sits exactly on a category boundary and its notes are classified by floating-point accident rather than by measurement.
+
+### Overall Verdict
+
+> [!IMPORTANT]
+> **The engine's resolution is sufficient; its criterion validity is untested.** At $2.65$ cents precision and $+0.52$ cents bias on string timbre, the measurement is finer than the ear it would be compared against, so no disagreement between the system and a listener could be attributed to the instrument being too coarse. Whether the system's flat / in-tune / sharp judgements agree with those of a trained string player has not been measured, and no claim to that effect is made anywhere in this manual. It is the primary direction for further work, and §2 above specifies the study.
