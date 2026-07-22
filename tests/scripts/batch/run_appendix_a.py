@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
-from src.midi_parser import parse_midi_with_timing, get_midi_tempo
+from src.midi_parser import parse_midi_with_timing, get_midi_tempo, load_part_notes, MidiTrackError
 from src.midi_alignment import process_dtw_alignment, calculate_dtw_metrics, is_note_excluded
 
 # ============================================================
@@ -146,17 +146,17 @@ def main():
         print(f"\nProcessing: {stem} (Track: {target_track}, Inst: {instrument_name})")
         
         # NO duration cap — process full track to match original Appendix A methodology
-        with open(midi_path, 'rb') as f:
-            midi_notes = parse_midi_with_timing(f, target_track=target_track)
-            if not midi_notes:
-                f.seek(0)
-                midi_notes = parse_midi_with_timing(f, target_track=0)
-            if not midi_notes:
-                f.seek(0)
-                midi_notes = parse_midi_with_timing(f, target_track=1)
-            
+        # Strict resolution: a single-part MIDI is taken as-is, a condensed score
+        # is indexed by part number, and anything ambiguous raises rather than
+        # silently analysing the wrong part.
+        try:
+            midi_notes, resolved_track = load_part_notes(midi_path, part_index=target_track)
+        except MidiTrackError as exc:
+            print(f"  [!] {stem}: {exc}")
+            continue
+
         if not midi_notes:
-            print(f"  [!] No valid notes found in Track {target_track}")
+            print(f"  [!] No valid notes found in Track {resolved_track}")
             continue
             
         bpm = get_midi_tempo(midi_path)

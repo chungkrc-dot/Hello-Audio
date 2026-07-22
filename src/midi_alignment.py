@@ -58,6 +58,51 @@ def pair_note_deviations(metrics_a, metrics_b, excluded_indices=None, key="Devia
     return np.asarray(values_a, dtype=float), np.asarray(values_b, dtype=float), labels
 
 
+# Detection-yield floors below which a run is flagged for the user to check that
+# the MIDI part, the audio file and the instrument setting really correspond.
+#
+# The thresholds are engine-specific because the two engines have different
+# floors on legitimate material. Across the 41-stem URMP corpus the worst
+# genuine pYIN detection yield is 70.6%, leaving 50% clear by 20 pp with no
+# false positives. REAPER runs lower by architecture — epoch dropout in the
+# upper register (§3B) takes one genuine track to 46.8% — so a shared 50% floor
+# would fire on known-good audio and train the warning into background noise.
+LOW_DETECTION_YIELD_THRESHOLDS = {"pYIN": 50.0, "REAPER": 40.0}
+DEFAULT_LOW_DETECTION_YIELD = 50.0
+
+
+def low_detection_yield_warning(pct_detected, pitch_engine=None, threshold=None):
+    """
+    Return a warning string if detection yield is low enough to suggest the
+    audio and the MIDI part may not correspond, else None.
+
+    This is advisory. A low yield has innocent causes — difficult repertoire,
+    a quiet or noisy recording, an aggressive amplitude gate — so the message
+    asks the user to verify rather than asserting a mistake. Its real purpose
+    is to catch the one error class no range check can see: a part swap between
+    two instruments of the same type (Violin I for Violin II), which collapses
+    yield because the two parts play different notes.
+    """
+    if pct_detected is None or np.isnan(pct_detected):
+        return None
+    if threshold is None:
+        threshold = LOW_DETECTION_YIELD_THRESHOLDS.get(
+            pitch_engine, DEFAULT_LOW_DETECTION_YIELD
+        )
+    if pct_detected >= threshold:
+        return None
+    return (
+        f"Only {pct_detected:.1f}% of the MIDI notes were detected in the audio "
+        f"(below the {threshold:.0f}% guidance level for {pitch_engine or 'this engine'}). "
+        "This is often just difficult or quiet material, but it is also what a "
+        "mismatch looks like. Worth confirming that the selected MIDI track is the "
+        "part actually played in this recording — parts for the same instrument "
+        "(Violin I vs Violin II) sit in the same range and cannot be told apart by "
+        "pitch alone — and that the audio file and instrument setting are the ones "
+        "you intended."
+    )
+
+
 def summarize_dtw_metrics(metrics, excluded_indices=None):
     """
     Aggregates the note-by-note DTW metrics into one overall performance summary.

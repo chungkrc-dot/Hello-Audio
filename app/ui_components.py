@@ -10,7 +10,9 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from itertools import zip_longest
-from src.midi_alignment import is_note_excluded, summarize_dtw_metrics
+from src.midi_alignment import (
+    is_note_excluded, summarize_dtw_metrics, low_detection_yield_warning,
+)
 from src.stats_summary import PYIN_RESOLUTION_CENTS, TRIM_PROPORTION
 
 # Rows of the distributional summary tables, in reporting order.
@@ -127,6 +129,7 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     instrument = st.sidebar.selectbox(
         "Select Instrument",
         ["Violin", "Viola", "Cello"],
+        key="selected_instrument",
         help="Sets the appropriate frequency detection range for the instrument."
     )
 
@@ -459,7 +462,8 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
     
     return excluded_indices
 
-def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=None):
+def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=None,
+                             pitch_engine=None):
     """
     Renders an overall performance summary table aggregating the note-by-note DTW metrics.
     Includes Delta calculation between Unplugged and Plugged conditions.
@@ -523,6 +527,13 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     
     st.caption("**Notes Detected (%)**: The percentage of expected MIDI notes that were successfully extracted by the pitch tracking algorithm.\n\n"
                "**Notes Included (%)**: The percentage of *detected notes* that successfully passed all algorithmic tracking filters (and manual exclusions) to contribute to the mean deviation calculations above.")
+
+    # Advisory: a very low detection yield is the only signal that catches a
+    # same-instrument part swap, which the tessitura check cannot see.
+    for label, summary in (("Unplugged", unp_summary), ("Plugged", plg_summary)):
+        msg = low_detection_yield_warning(summary["pct_detected"], pitch_engine)
+        if msg:
+            st.warning(f"**{label}:** {msg}")
 
     # --- Distributional summary ---
     st.write("**Deviation Distribution Statistics (DTW)**")

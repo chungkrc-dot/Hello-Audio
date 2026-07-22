@@ -74,13 +74,46 @@ def main():
     with col_u3:
         file_midi = st.file_uploader("Upload MIDI Reference (Optional)", type=["mid", "midi"])
         if file_midi is not None:
-            from src.midi_parser import get_midi_tracks
-            tracks = get_midi_tracks(file_midi)
-            if len(tracks) > 1:
+            from src.midi_parser import (
+                describe_midi_tracks, format_track_label,
+                fits_instrument, best_fitting_instrument,
+            )
+            # The instrument selector lives in the sidebar, which is rendered
+            # after this block; read the committed value so track labels can be
+            # annotated against it on every rerun after the first.
+            sel_instrument = st.session_state.get("selected_instrument")
+            tracks = describe_midi_tracks(file_midi)
+
+            if not tracks:
+                st.error("This MIDI file contains no note events.")
+            elif len(tracks) == 1:
+                # A single-part MIDI is assumed to be the correct part — the
+                # assumption the application is built on. No prompt is shown.
+                target_track = next(iter(tracks))
+            else:
                 track_options = list(tracks.keys())
-                track_labels = [tracks[t] for t in track_options]
-                selected_label = st.selectbox("Select Track to Analyze", track_labels)
+                track_labels = [format_track_label(t, tracks[t], sel_instrument)
+                                for t in track_options]
+                selected_label = st.selectbox(
+                    "Select Track to Analyze", track_labels,
+                    help="This MIDI holds several parts (a condensed score). Pick the "
+                         "one matching the uploaded audio — the pitch range and duration "
+                         "shown are the best guide."
+                )
                 target_track = track_options[track_labels.index(selected_label)]
+
+            # Advisory only: transposing parts and scordatura are legitimate, so
+            # never block the run on a range mismatch.
+            if target_track is not None and sel_instrument:
+                entry = tracks[target_track]
+                if not fits_instrument(entry['lo'], entry['hi'], sel_instrument):
+                    alt = best_fitting_instrument(entry['lo'], entry['hi'])
+                    st.warning(
+                        f"Track {target_track} spans {entry['lo_note']}–{entry['hi_note']}, "
+                        f"outside the expected range for {sel_instrument}"
+                        + (f" (it fits {alt.capitalize()})." if alt else ".")
+                        + " Check that this is the right part before analysing."
+                    )
 
     # ==========================================
     # 2. Sidebar Parameters
@@ -259,7 +292,8 @@ def main():
                         dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg, correction_array_plg, res_plg.get('voicing_prob'), reference_pitch_hz)
                         
                     excluded_indices = render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg)
-                    render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices)
+                    render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices,
+                                             pitch_engine=pitch_engine)
 
                     # Distribution + Bland-Altman diagnostics for the shape statistics
                     # reported in the summary table above.

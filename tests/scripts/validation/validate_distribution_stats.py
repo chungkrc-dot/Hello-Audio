@@ -61,7 +61,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
-from src.midi_parser import parse_midi_with_timing
+from src.midi_parser import parse_midi_with_timing, load_part_notes, MidiTrackError
 from src.midi_alignment import (
     process_dtw_alignment, calculate_dtw_metrics, is_note_excluded,
     included_note_deviations, pair_note_deviations
@@ -275,14 +275,8 @@ def mark_duplicate_audio(tracks):
 
 
 def load_midi_notes(midi_path, target_track):
-    with open(midi_path, 'rb') as f:
-        midi_notes = parse_midi_with_timing(f, target_track=target_track)
-        if not midi_notes:
-            f.seek(0)
-            midi_notes = parse_midi_with_timing(f, target_track=0)
-        if not midi_notes:
-            f.seek(0)
-            midi_notes = parse_midi_with_timing(f, target_track=1)
+    """Strictly resolve one part; raises MidiTrackError rather than guessing."""
+    midi_notes, _ = load_part_notes(midi_path, part_index=target_track)
     return midi_notes
 
 

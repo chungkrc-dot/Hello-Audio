@@ -133,13 +133,174 @@ def parse_midi_with_timing(audio_file, target_track=None):
     midi_notes.sort(key=lambda x: x['Start_Time'])
     return midi_notes
 
-def get_midi_tracks(audio_file):
-    track_info = {}
-    for trk_idx, event_type, abs_time, p1, p2, meta_type, meta_data in _iter_midi_events(audio_file):
-        if event_type == 0x9 and p2 > 0:
-            track_info[trk_idx] = track_info.get(trk_idx, 0) + 1
-            
-    return {trk_idx: f"Track {trk_idx} ({count} notes)" for trk_idx, count in track_info.items()}
+class MidiTrackError(ValueError):
+    """Raised when a part cannot be resolved from a MIDI file unambiguously."""
+
+
+# Nominal written tessitura per instrument, as MIDI note numbers. Mirrors the
+# bounds in pitch_engine.get_instrument_fmin_fmax() but expressed in MIDI space,
+# since track selection reasons about note numbers rather than Hz.
+INSTRUMENT_TESSITURA = {
+    "violin": (55, 96),   # G3 - C7
+    "viola": (48, 93),    # C3 - A6
+    "cello": (36, 88),    # C2 - E6
+}
+
+# Slack allowed before a track is reported as outside an instrument's range.
+# Two semitones absorbs scordatura and the occasional notated harmonic without
+# masking a genuine part mix-up, which is normally off by an octave or more.
+TESSITURA_SLACK = 2
+
+
+def describe_midi_tracks(audio_file):
+    """
+    Summarise every track that carries notes.
+
+    Returns {trk_idx: {'count', 'lo', 'hi', 'lo_note', 'hi_note', 'end_time'}},
+    where lo/hi are MIDI note numbers and end_time is in seconds. Used to build
+    informative track labels so a user choosing a part is not guessing from a
+    note count alone.
+    """
+    info = {}
+    generator = _iter_midi_events(audio_file)
+    try:
+        header = next(generator)
+    except StopIteration:
+        return info
+    if header[0] != 'header':
+        return info
+    ticks_per_quarter = header[3] if header[3] > 0 else 480
+    seconds_per_tick = 500000 / (ticks_per_quarter * 1000000)
+
+    for trk_idx, event_type, abs_time, p1, p2, meta_type, meta_data in generator:
+        if event_type == 'meta' and meta_type == 0x51 and len(meta_data) == 3:
+            tempo_usec = int.from_bytes(meta_data, 'big')
+            seconds_per_tick = tempo_usec / (ticks_per_quarter * 1000000)
+        elif event_type == 0x9 and p2 > 0:
+            e = info.setdefault(trk_idx, {'count': 0, 'lo': 127, 'hi': 0, 'end_tick': 0})
+            e['count'] += 1
+            e['lo'] = min(e['lo'], p1)
+            e['hi'] = max(e['hi'], p1)
+            e['end_tick'] = max(e['end_tick'], abs_time)
+
+    for e in info.values():
+        e['end_time'] = e.pop('end_tick') * seconds_per_tick
+        e['lo_note'] = librosa.midi_to_note(e['lo'])
+        e['hi_note'] = librosa.midi_to_note(e['hi'])
+    return info
+
+
+def fits_instrument(lo, hi, instrument, slack=TESSITURA_SLACK):
+    """True if a track's [lo, hi] MIDI range lies within the instrument's tessitura."""
+    bounds = INSTRUMENT_TESSITURA.get((instrument or "").lower())
+    if bounds is None:
+        return True
+    return lo >= bounds[0] - slack and hi <= bounds[1] + slack
+
+
+def best_fitting_instrument(lo, hi, slack=TESSITURA_SLACK):
+    """Name the instrument whose tessitura best contains [lo, hi], or None."""
+    fits = [n for n in INSTRUMENT_TESSITURA if fits_instrument(lo, hi, n, slack)]
+    if not fits:
+        return None
+    # Prefer the tightest range that still contains the track.
+    return min(fits, key=lambda n: INSTRUMENT_TESSITURA[n][1] - INSTRUMENT_TESSITURA[n][0])
+
+
+def format_track_label(trk_idx, entry, instrument=None):
+    """Human-readable track label: note count, pitch range, duration, and fit."""
+    label = (f"Track {trk_idx} — {entry['count']} notes, "
+             f"{entry['lo_note']}–{entry['hi_note']}, {entry['end_time']:.1f} s")
+    if instrument:
+        if fits_instrument(entry['lo'], entry['hi'], instrument):
+            label += f"  ✓ fits {instrument}"
+        else:
+            alt = best_fitting_instrument(entry['lo'], entry['hi'])
+            label += f"  ✗ outside {instrument}" + (f" (fits {alt.capitalize()})" if alt else "")
+    return label
+
+
+def get_midi_tracks(audio_file, instrument=None):
+    """
+    Map of track index to display label, for tracks carrying notes.
+
+    Labels include pitch range and duration so that selecting a part from a
+    condensed score is an informed choice rather than a guess.
+    """
+    info = describe_midi_tracks(audio_file)
+    return {i: format_track_label(i, e, instrument) for i, e in info.items()}
+
+
+def resolve_target_track(audio_file, requested_track=None, part_index=None):
+    """
+    Decide which MIDI track holds the part to analyse, or fail loudly.
+
+    Resolution order:
+      1. Exactly one track carries notes -> that track, regardless of what was
+         requested. A single-part MIDI is taken to be the correct part, which is
+         the assumption the application is built on.
+      2. An explicit `requested_track` -> honoured if it carries notes, else
+         MidiTrackError. There is deliberately no fallback to another track:
+         silently analysing the wrong part is worse than refusing.
+      3. A `part_index` (the URMP part number) -> mapped onto the track of the
+         same index, valid only under the conductor-track convention where
+         track 0 is silent. If track 0 carries notes the convention does not
+         hold and the mapping would be off by one, so this raises instead.
+
+    Returns (track_index, track_info_dict).
+    """
+    info = describe_midi_tracks(audio_file)
+    if not info:
+        raise MidiTrackError("MIDI file contains no note events.")
+
+    if len(info) == 1:
+        only = next(iter(info))
+        return only, info
+
+    if requested_track is not None:
+        if requested_track not in info:
+            raise MidiTrackError(
+                f"Requested track {requested_track} carries no notes. "
+                f"Tracks with notes: {sorted(info)}."
+            )
+        return requested_track, info
+
+    if part_index is not None:
+        if 0 in info:
+            raise MidiTrackError(
+                "Cannot map part index onto track index: this file has notes on "
+                "track 0, so it does not use the silent-conductor-track "
+                f"convention and part {part_index} would be off by one. "
+                f"Tracks with notes: {sorted(info)}. Select a track explicitly."
+            )
+        if part_index not in info:
+            raise MidiTrackError(
+                f"Part {part_index} maps to track {part_index}, which carries no "
+                f"notes. Tracks with notes: {sorted(info)}."
+            )
+        return part_index, info
+
+    raise MidiTrackError(
+        f"MIDI file has {len(info)} tracks with notes ({sorted(info)}); "
+        "a track must be selected explicitly."
+    )
+
+
+def load_part_notes(midi_path, part_index=None, requested_track=None):
+    """
+    Load the timed notes of one part from a MIDI file, resolving the track
+    strictly. Raises MidiTrackError rather than falling back to another track.
+
+    This is the loader for batch and validation runs, where a wrong-part
+    analysis would otherwise surface as a merely mediocre yield rather than an
+    error. Returns (notes, resolved_track_index).
+    """
+    with open(midi_path, 'rb') as f:
+        track, _info = resolve_target_track(
+            f, requested_track=requested_track, part_index=part_index
+        )
+    with open(midi_path, 'rb') as f:
+        return parse_midi_with_timing(f, target_track=track), track
 
 def get_midi_tempo(midi_file_path):
     with open(midi_file_path, 'rb') as f:

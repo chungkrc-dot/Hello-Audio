@@ -29,7 +29,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.pitch_engine import extract_pitch_and_rms, analyze_intonation
-from src.midi_parser import parse_midi_with_timing
+from src.midi_parser import parse_midi_with_timing, load_part_notes, MidiTrackError
 from src.midi_alignment import process_dtw_alignment, calculate_dtw_metrics, is_note_excluded
 
 REPORT_PATH = os.path.join(SCRIPT_DIR, 'inter_engine_agreement_report.md')
@@ -180,14 +180,11 @@ def main():
         instrument = t['instrument']
         print(f"[{i}/{len(tracks)}] {stem} ({instrument})", flush=True)
 
-        with open(t['midi_path'], 'rb') as f:
-            midi_notes = parse_midi_with_timing(f, target_track=t['target_track'])
-            if not midi_notes:
-                f.seek(0)
-                midi_notes = parse_midi_with_timing(f, target_track=0)
-            if not midi_notes:
-                f.seek(0)
-                midi_notes = parse_midi_with_timing(f, target_track=1)
+        try:
+            midi_notes, _ = load_part_notes(t['midi_path'], part_index=t['target_track'])
+        except MidiTrackError as exc:
+            print(f"  [!] {stem}: {exc}")
+            continue
 
         if not midi_notes:
             print(f"  [!] No MIDI notes found, skipping")
