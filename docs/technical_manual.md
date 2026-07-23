@@ -2017,3 +2017,56 @@ The comparison also requires an in-tune half-band, which the engine does not its
 
 > [!IMPORTANT]
 > **The engine's resolution is sufficient; its criterion validity is untested.** At $2.65$ cents precision and $+0.52$ cents bias on string timbre, the measurement is finer than the ear it would be compared against, so no disagreement between the system and a listener could be attributed to the instrument being too coarse. Whether the system's flat / in-tune / sharp judgements agree with those of a trained string player has not been measured, and no claim to that effect is made anywhere in this manual. It is the primary direction for further work, and §2 above specifies the study.
+
+---
+
+## Appendix L: Short-Excerpt Validation Under the Research Configuration
+
+Appendices A and F validate the engine's *shipped* defaults on full-length URMP stems (Global DTW, engine-optimal parameters). This appendix validates the **research configuration** — the settings §1 recommends overriding to for the controlled earplug study — on URMP string material re-formatted to mimic the study's recording protocol: short excerpts cut at rests. It is the direct end-to-end check that the configuration the study will actually run recovers pitch on real bowed-string audio, and it is the validation cross-referenced from §1's *Default Configuration* section.
+
+### Configuration Tested
+
+The exact production code path (`extract_pitch_and_rms` → `analyze_intonation` → `process_dtw_alignment` → `calculate_dtw_metrics`) is run under the study's intended settings, differing from the shipped defaults in the two overrides §1 specifies:
+
+| Setting | Value | Relation to shipped default |
+| :--- | :--- | :--- |
+| DTW alignment mode | **Subsequence** (`Force Global` off) | Overridden (shipped: Global) |
+| Adaptive RMS gating | **Off** — static gate $\theta_{static} = 0.005$ | Overridden (shipped: Enabled, $\beta = 2.0$) |
+| Pitch engine | pYIN | Study default |
+| Excerpt length | $\le 120$ s | Study recording format |
+| `switch_prob` / `min_frames` / `max_pitch_slope` | $0.005$ / $2$ / $0.50$ | Engine Optimal Default |
+
+The harness is `tests/scripts/validation/validate_short_excerpts.py`.
+
+### Data Preparation
+
+The 41 bowed-string stems of the URMP corpus (23 Violin, 8 Viola, 10 Cello — the Appendix A selection) are drawn from the authoritative full URMP release, which is internally self-consistent: audio (`AuSep_*.wav`), score MIDI (`Sco_*.mid`, per-part track), and the audio-aligned ground-truth note transcription (`Notes_*.txt`, giving each performed note's onset, frequency and duration). Each stem is processed as follows:
+
+1. **Segmentation at rests.** Stems longer than the $120$ s excerpt cap are cut into excerpts at note gaps $\ge 0.20$ s (a $0.10$ s margin is kept around each cut), greedily choosing the latest rest that keeps each excerpt within the cap. This reproduces the study's short-trimmed-excerpt format. The 41 stems yield **61 excerpts** (mean $73.5$ s, range $2.2$–$120.1$ s).
+2. **Score↔ground-truth pitch alignment.** The score note sequence and the ground-truth transcription are aligned to each other by pitch via DTW, accepting a match only where the two pitches agree within a semitone. This tolerates the few inserted/dropped notes between score and performance and yields, for each score note, the ground-truth *performed* frequency.
+3. **Two independent references.** The score MIDI is the reference the pipeline aligns to (as in the app); the `Notes` frequency is an **independent** ground truth for what was actually played. Detection and inclusion are scored against the score; pitch-recovery accuracy is the cents error between the pipeline's per-note detected pitch and the ground-truth performed pitch for the *same* note — the metrological check the annotations make possible.
+
+### Results
+
+Per-instrument means across excerpts, plus an overall row. **Detection yield** = detected / expected score notes; **inclusion yield** = passing `is_note_excluded()` / detected; **$|$acc$|$ MAE** and **median** are the absolute cents error of detected-vs-ground-truth performed pitch.
+
+| Instrument | Stems | Excerpts | Detection Yield | Inclusion Yield | $\lvert\text{acc}\rvert$ MAE | $\lvert\text{acc}\rvert$ Median |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Violin | 23 | 34 | $98.2\%$ | $97.2\%$ | $5.0$ c | $2.7$ c |
+| Viola | 8 | 12 | $97.7\%$ | $87.9\%$ | $9.2$ c | $3.8$ c |
+| Cello | 10 | 15 | $97.3\%$ | $91.8\%$ | $21.4$ c | $3.7$ c |
+| **Overall** | **41** | **61** | **$97.9\%$** | **$94.0\%$** | **$9.8$ c** | **$3.2$ c** |
+
+Detection is uniformly high ($\ge 97\%$) across all three instruments: the research configuration recovers essentially all notated notes from real bowed-string audio segmented into short excerpts. Pitch recovery is at the metrological floor established in Appendix E ($2.65$ c precision) for the *typical* note — the per-excerpt **median** cents error is $2.7$–$3.8$ c across all three instruments.
+
+> [!NOTE]
+> **Why the MAE exceeds the median, especially on cello.** The mean absolute error ($9.8$ c overall, $21.4$ c on cello) sits well above the median ($3.2$ c / $3.7$ c) because a small number of excerpts contain a handful of gross per-note errors — octave and harmonic-fold confusions on heavily-vibratoed low-register cello notes — that inflate the mean while leaving the median untouched. The structure is consistent across the outliers: the top eight excerpts by MAE ($25$–$89$ c) all retain a per-excerpt median of $3$–$10$ c. Of the 61 excerpts, 40 have MAE $\le 5$ c and the median per-excerpt MAE is $3.8$ c. The typical note is recovered to a few cents; the mean is a tail statistic, not a location one — the same reason Appendix J prescribes the trimmed mean over the raw mean on pYIN output.
+
+### Scope and Caveats
+
+Two limits bound what this validation establishes, and both make it a *conservative* check rather than an optimistic one:
+
+* **(a) URMP is expressively played.** The URMP performances contain the vibrato, rubato and dynamic shading the study's recording protocol is specifically designed to suppress (§1, *Purpose and measurement scope*). Vibrato widens the per-note pitch distribution and drives the low-register octave confusions seen in the outlier tail; rubato stresses the alignment. This validation therefore runs the pipeline on material *harder* than the controlled study recordings will be, so the yields and typical-note accuracy reported here are a floor, not a ceiling, for the study's own takes.
+* **(b) URMP has one condition per stem.** Each URMP stem is a single performance. This validation therefore exercises and validates the **measurement pipeline** — that the research configuration detects notes and recovers performed pitch on real audio — but it says nothing about the earplug effect itself, which is a *paired* Unplugged-vs-Plugged contrast the URMP corpus cannot supply. The effect-level analysis is specified elsewhere; this appendix underwrites only the instrument that analysis depends on.
+
+The per-excerpt results are written incrementally to `tests/scripts/validation/short_excerpt_results.csv` (one row per excerpt; the harness is resumable and skips completed stems on re-launch). That path is not committed with this manual.
