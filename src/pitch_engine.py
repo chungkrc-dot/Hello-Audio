@@ -173,6 +173,10 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True, referenc
             tuning_offset = 1200 * np.log2(reference_pitch_hz / 440.0) / 100.0
             continuous_midi = continuous_midi - tuning_offset
 
+            # Scale librosa's A=440-based target frequencies into the selected
+            # reference so the plotted target line and Hz deviations track tuning.
+            tuning_ratio = reference_pitch_hz / 440.0
+
             if enable_locked_target:
                 # --- Locked Target Rule ---
                 island_median_midi = np.median(continuous_midi)
@@ -182,8 +186,8 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True, referenc
                 detected_notes_sequence.append(note_name)
                 
                 island_deviation = (continuous_midi - locked_target_note) * 100
-                
-                target_hz = librosa.midi_to_hz(locked_target_note)
+
+                target_hz = librosa.midi_to_hz(locked_target_note) * tuning_ratio
                 island_deviation_hz = valid_island_f0 - target_hz
                 
                 # For f0_target
@@ -197,7 +201,7 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True, referenc
                 detected_notes_sequence.append(note_name)
                 
                 island_deviation = (continuous_midi - target_note_array) * 100
-                target_hz_array = librosa.midi_to_hz(target_note_array)
+                target_hz_array = librosa.midi_to_hz(target_note_array) * tuning_ratio
                 island_deviation_hz = valid_island_f0 - target_hz_array
                 
             deviation_cents_list.extend(island_deviation)

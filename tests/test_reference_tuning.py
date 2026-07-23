@@ -61,11 +61,20 @@ def test_reference_tuning():
     assert res_442['success'], "A=442 analysis should succeed"
     mean_442 = res_442['mean_dev']
 
-    print(f"442 Hz sine @ A=440 reference: mean deviation = {mean_440:+.2f} cents")
-    print(f"442 Hz sine @ A=442 reference: mean deviation = {mean_442:+.2f} cents")
+    # Hz-domain outputs must track the tuning reference too: at A=442 the target
+    # is 442 Hz, so an in-tune 442 Hz sine deviates ~0 Hz (not ~+2 Hz vs 440).
+    mean_hz_440 = res_440['mean_dev_hz']
+    mean_hz_442 = res_442['mean_dev_hz']
+
+    print(f"442 Hz sine @ A=440 reference: mean deviation = {mean_440:+.2f} cents, {mean_hz_440:+.2f} Hz")
+    print(f"442 Hz sine @ A=442 reference: mean deviation = {mean_442:+.2f} cents, {mean_hz_442:+.2f} Hz")
 
     assert abs(mean_440) > 5.0, f"A=440 should show significant bias, got {mean_440:.2f}c"
     assert abs(mean_442) < 3.0, f"A=442 should be near zero, got {mean_442:.2f}c"
+    # Tolerances mirror the cents bands above; the ~0.5 Hz residual at A=442 is
+    # pYIN's quantization floor (~2 cents), not a tuning error.
+    assert abs(mean_hz_440) > 1.5, f"A=440 Hz deviation should be significant, got {mean_hz_440:.2f} Hz"
+    assert abs(mean_hz_442) < 0.75, f"A=442 Hz deviation should be near zero, got {mean_hz_442:.2f} Hz"
 
     print("\nPASSED: Reference tuning correction works correctly.")
 
