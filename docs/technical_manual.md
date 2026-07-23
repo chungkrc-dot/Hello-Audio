@@ -9,6 +9,9 @@
 > [!WARNING]
 > **Dataset & Instrument Caveat:** Hello-Audio is primarily designed, parameterized, and tested using the relevant instrument samples from the URMP dataset (Li et al., 2019). As such, the application in its current state is strictly validated for **Violin, Viola, and Cello**. It should not be used to analyze other instruments without further calibration.
 
+> [!IMPORTANT]
+> **Purpose and measurement scope.** Hello-Audio was designed for one specific comparison: the difference in **amplitude** and **intonation** when a performer plays **without earplugs (the "Unplugged" condition)** versus **with earplugs (the "Plugged" condition)**. Because those two quantities are the effect under study, expressive variation that also moves amplitude or pitch — dynamic shading, tempo fluctuation, ornaments, and vibrato — should be **minimised in the recorded performances**, as it otherwise confounds the measurement. The engine remains functional when such expression is present, but the comparison is only clean when it is suppressed. The recording protocol and the recommended analysis configuration for this study are specified in *Intended Use and Recording Protocol* and *Default Configuration: DTW Alignment and Adaptive RMS Gating* below.
+
 The **Hello-Audio** application is a comparative analysis engine designed to evaluate the physical execution of musical performances on string instruments. It evaluates performance across two fundamental dimensions: **amplitude (intensity)** and **intonation (frequency deviation)**. The system is engineered to isolate intentional, steady-state notes while rejecting mechanical noise, transient attacks, bow changes, glissandos, and room reverberation.
 
 The processing flow operates under two modes:
@@ -89,6 +92,37 @@ Appendix K stands apart from that argument. Every appendix before it validates t
 > 2. It rejects transient acoustic events, ambient noise (**RMS Thresholding**), anomalous frequency slides (**Pitch Slope Filter**), and momentary tracking artifacts (**Sustain Duration Filter**).
 > 3. In the absence of a reference score, the system assumes the performer's intended pitch is the nearest standard semitone, maintaining this target irrespective of minor performance drift (**Locked Target Rule**).
 > 4. When a reference score is provided, the system dynamically aligns the temporal execution of the performance to the score (**Dynamic Time Warping**), while mathematically resolving harmonic tracking artifacts that occur in adjacent registers (**Octave Folding**).
+
+### Intended Use and Recording Protocol
+
+The engine isolates the steady-state loudness and pitch of each note so that the only systematic difference between two recordings is the condition under test — earplugs versus none. Expressive gestures move the same two quantities the study measures: a *crescendo* changes amplitude, a *ritardando* changes the note durations DTW must align, an ornament inserts unscored notes, and vibrato modulates pitch by tens of cents around the note centre. To keep the plugged/unplugged contrast interpretable, performances should be recorded under deliberately constrained conditions. The engine will still produce output when these constraints are relaxed, but the measurement is only clean when they are observed.
+
+The recommended protocol:
+
+1. **Fixed repertoire per instrument.** Every participant plays the same score for a given instrument, so each plugged/unplugged contrast is a within-material comparison.
+2. **Minimal expression.** Steady dynamics (no crescendo/diminuendo), steady tempo (no *accelerando* or *ritardando*), **no ornaments**, and **no vibrato**. This is a deliberate experimental control, and it is the single largest lever on measurement cleanliness — see the caveat below.
+3. **Short excerpts.** Keep each take short (**≤ ~2 minutes**). This is primarily a data-hygiene and reproducibility choice — short trimmed excerpts are easier to align, verify and re-run, and they bound the cost of any single bad take. It is *not* required for alignment stability: §6 shows the current $\Sigma_2$ pipeline aligns full-length stems under Subsequence without drift.
+4. **Controlled acoustics.** Record in a quiet, low-reverberation room. Hold microphone type, position and gain **identical** across the plugged and unplugged takes of the same performer and piece, and capture both conditions in one session (intonation drifts with fatigue, re-tuning and temperature).
+5. **Trim to the notes.** Remove leading and trailing silence so the analysed file begins at the first note and ends at the last. Room tone may be recorded separately to document signal-to-noise ratio, but it should not sit inside the analysed region.
+6. **No click track required.** Performers may play at their own steady tempo near the score's written tempo; the recommended Subsequence alignment mode (below) absorbs a moderate tempo offset without one.
+
+> [!CAUTION]
+> **Suppressing vibrato trades ecological validity for measurement control.** Real performance includes vibrato, so a corpus recorded without it is not a sample of natural playing. This is an acceptable and deliberate control here — vibrato modulates pitch by tens of cents and would confound a "centre pitch" measurement — but it must be reported as a designed constraint rather than an oversight, and any generalisation of the results to expressive performance is out of scope.
+
+### Default Configuration: DTW Alignment and Adaptive RMS Gating
+
+Two of the application's default settings are tuned for the general case — field recordings of unknown length, gain and noise, of the kind found in the URMP validation corpus. The controlled protocol above is a different regime, and for it two defaults should be **overridden**. The shipped defaults, their justifications, and the recommended overrides are as follows. Both settings are also listed in the consolidated defaults table in §9, and the underlying mechanisms are specified in §4A (Adaptive RMS) and §6 (DTW modes).
+
+**DTW alignment mode — shipped default: Global (`Force Global DTW Alignment` on).**
+Global DTW anchors both endpoints of the audio and the score, which bounds the maximum cumulative warping drift. It is a sound conservative default when the recording length is unknown. (Historically it also guarded against a Subsequence yield-collapse on long dense stems; §6 documents that this was an artifact of the old $\Sigma_1$ step pattern and that the current $\Sigma_2$ pattern has resolved it — Subsequence is now robust even at full stem length.)
+*Recommended override for this protocol: use **Subsequence** DTW (uncheck `Force Global`).* The reason is tempo flexibility, not drift avoidance: Subsequence relaxes the endpoint constraints, so it absorbs the participant-to-participant tempo variation this study expects without requiring a click track (the $\Sigma_2$ step pattern represents any performance between $0.5\times$ and $2.0\times$ the score tempo — §6). Under $\Sigma_2$ it matches Global to within ~3 pp of detection even on the worst-case long stem, so choosing it costs nothing on short trimmed excerpts while handling the tempo spread Global would fight. This configuration is validated directly on URMP string material in the short-excerpt validation (Appendix L).
+
+> [!NOTE]
+> **Literature check — recommended analysis duration for Subsequence DTW.** A review of the pitch-tracking and music-alignment literature (Mauch & Dixon, 2014; Müller, 2015; and the DTW music-retrieval literature surveyed for this manual) found **no published guideline prescribing a maximum recording duration for Subsequence DTW.** The literature treats sequence length as a *computational* constraint — DTW's quadratic time and memory cost motivates multiscale and segmented variants for speed, not accuracy — and treats alignment drift as an *algorithmic* problem, addressed by flexible boundary conditions and alignment-reliability estimation rather than by any length limit. Consistent with this, the current $\Sigma_2$ pipeline shows no length-driven Subsequence collapse (§6). The **≤ ~2-minute** figure recommended here is therefore **a description of the study's recording format, not a stability limit of the engine**, and is presented as such.
+
+**Adaptive RMS gating — shipped default: Enabled ($\beta = 2.0$).**
+The adaptive floor $\theta_{effective} = \max(\theta_{static}, 2 \cdot P_{10}(\text{RMS}))$ tracks the true noise floor of each recording session, which is the correct behaviour for field recordings with unknown, variable microphone gain and room noise (§4A). Its stated assumption is that at least 10% of the recording is rests or ambient silence, so the 10th percentile samples noise rather than signal.
+*Recommended override for this protocol: **disable** Adaptive RMS (uncheck `Enable Adaptive RMS Threshold`) and rely on the static gate $\theta_{static} = 0.005$.* In a controlled studio the noise floor is low and known, so adaptive tracking gains nothing; and near-continuous solo playing rarely contains 10% true silence, so the 10th-percentile "noise floor" instead lands on soft *real notes*, driving the gate up into the signal and discarding genuine quiet notes. This is the same degenerate case noted for continuous synthetic tones in Appendix E. A quick diagnostic: if $2 \cdot P_{10}(\text{RMS})$ approaches the median RMS of the take, the adaptive floor is over-gating and should be turned off.
 
 ---
 
@@ -537,36 +571,42 @@ The DTW alignment engine supports two distinct operational modes, controlled by 
 - **Global DTW** (`subseq=False`): Anchors both the start and end of the MIDI and audio sequences, forcing a complete end-to-end alignment. The algorithm must map the entire audio to the entire score.
 - **Subsequence DTW** (`subseq=True`): Allows the shorter sequence to find its best-matching subsequence within the longer one, without constraining the endpoints. This is more flexible when the audio and MIDI have different total durations or significant leading/trailing silence.
 
-#### Empirical Finding: Subsequence DTW Yield Collapse on K515 Cello
+#### Historical Failure Mode: Subsequence DTW Yield Collapse under $\Sigma_1$ (Resolved by $\Sigma_2$)
 
-Batch testing across the URMP dataset revealed a significant, previously undocumented failure mode for Subsequence DTW on at least one long, dense track. On the longest track in the dataset — the K515 Quintet (Cello part, `AuSep_5_vc_44_K515`, 411 seconds, 360 MIDI notes) — switching from Global to Subsequence DTW caused a catastrophic yield collapse:
+Under the original $\Sigma_1$ step pattern, Subsequence DTW collapsed on the longest, densest string stem in the corpus — the K515 Quintet cello part (`AuSep_5_vc_44_K515`, 360 MIDI notes, **~225 s of audio**). Switching from Global to Subsequence dropped detection yield catastrophically:
 
-| Engine | Global DTW Yield | Subsequence DTW Yield | Delta |
+| Engine | Global ($\Sigma_1$) | Subsequence ($\Sigma_1$) | Delta |
 | :--- | :---: | :---: | :---: |
 | **REAPER** | 88.89% | 45.28% | **−43.61 pp** |
-| **pYIN** | 93.61% | 53.89% | **−39.72 pp** |
+| **pYIN** | 93.61% | 50.56% | **−43.05 pp** |
 
-> [!NOTE]
-> These figures come from a dedicated mode-comparison run (`tests/scripts/batch/diagnose_dtw_mode.py`, archived at `tests/outputs/batch_results/dtw_mode_comparison.csv`) rather than from the Appendix A batch, and both columns predate the $\Sigma_1 \rightarrow \Sigma_2$ step-pattern change. The pYIN Global figure ($93.61\%$) reproduces the Appendix A value for this track exactly; the REAPER Global figure ($88.89\%$) sits $1.94$ pp below Appendix A's $90.83\%$. The two runs use identical parameters, so the residual is attributable to the separate code paths, and it is small relative to the $\sim 40$ pp effect under discussion. The **magnitude of the collapse**, not the absolute yield, is the finding.
+*(Dedicated mode-comparison run, archived at `tests/outputs/batch_results/dtw_mode_comparison.csv`; $\Sigma_1$-era figures.)* The undetected notes were not uniform: under Subsequence they clustered in the **back half** of the recording —
 
-However, duration alone does not appear to be a sufficient predictor of this failure. The K515 Violin 2 part (`AuSep_2_vn_44_K515`, 477 notes), from the exact same 411-second piece, showed only a negligible difference between modes (e.g., Global: 89.94% vs Subsequence: 89.69% for REAPER, a ~0.25% delta). It remains an open question what specifically makes the cello part vulnerable to this collapse—whether it is note density, specific passage content, or something unique about the chroma matching for that part.
-
-Critically, for the affected cello track, the NaN (undetected) notes under Subsequence DTW were **not uniformly distributed** across the piece. Per-note quartile analysis showed that failed notes clustered overwhelmingly in the third and fourth quarters of the recording:
-
-| Quartile | REAPER NaN Count (SubSeq) | pYIN NaN Count (SubSeq) |
+| Quartile | REAPER NaN (SubSeq, $\Sigma_1$) | pYIN NaN (SubSeq, $\Sigma_1$) |
 | :--- | :---: | :---: |
 | Q1 (Notes 1–90) | 16 | 13 |
 | Q2 (Notes 91–180) | 8 | 6 |
 | Q3 (Notes 181–270) | 73 | 69 |
 | Q4 (Notes 271–360) | 90 | 90 |
 
-*Data from `AuSep_5_vc_44_K515`. Total NaNs: 187 (REAPER), 178 (pYIN).*
+— the signature of **cumulative temporal drift**: with pure horizontal and vertical steps permitted, the Subsequence path could slide along one axis without advancing the other, and small misalignments compounded until, by the third quarter, MIDI note boundaries mapped onto audio where the instrument was playing different notes entirely (`NaN` deviations).
 
-This clustering pattern is consistent with cumulative temporal drift: in Subsequence DTW, the warping path is free to "slide" within the longer sequence, and small misalignments compound over time. By the third quarter of a 7-minute recording, the accumulated offset causes the MIDI note boundaries to map to audio regions where the instrument is playing a different note entirely, producing `NaN` Deviation values (no valid pitch frames within the warped note boundary).
+**Resolution.** The restricted $\Sigma_2$ step pattern (Appendix D), which eliminates pure horizontal/vertical steps and constrains the local slope to $[\tfrac{1}{2}, 2]$, removes the collapse. Re-running the same stem on the current pipeline with **only the step pattern varied** (audio, features, masks and MIDI held identical):
 
-Global DTW prevents this by anchoring the endpoints, constraining the maximum possible drift at any point in the sequence. 
+| Step pattern | Subsequence detection | NaN Q1·Q2·Q3·Q4 |
+| :--- | :---: | :---: |
+| $\Sigma_1$ (old) | 50.83% | 13 · 6 · 68 · 90 (clustered) |
+| $\Sigma_2$ (current) | **93.89%** | 11 · 3 · 5 · 3 (flat) |
 
-**Recommendation:** This app version has been observed to show reduced DTW alignment yield with subsequence mode on at least one long, dense track. Global mode is recommended as a safer default for long recordings pending further investigation into what specifically triggers this cumulative drift.
+Under $\Sigma_2$, Subsequence detection (93.89%) sits within ~3 pp of Global (96.94%, the Appendix D value) on this worst-case stem, and the back-half clustering is gone. The collapse was therefore a property of the $\Sigma_1$ step pattern — not of Subsequence mode or of recording length as such — and **the current pipeline does not exhibit it.** The step-pattern mechanism is engine-independent; the pYIN figures above were confirmed directly, and REAPER is expected to behave analogously.
+
+> [!NOTE]
+> **Correction to earlier records.** Earlier revisions of this section, and the notes in Appendices A and D, described this stem as "411 seconds" or a "7-minute recording." That figure was the score MIDI's *nominal span* (~405 s at the written tempo); the **audio recording is ~225 s** (≈3.75 min). The note count (360) is correct. The severe $\Sigma_1$ collapse figures were likewise pre-$\Sigma_2$, as flagged when they were recorded; the $\Sigma_2$ numbers above supersede them for the current engine.
+
+**Recommendation.** Because $\Sigma_2$ removes the collapse, DTW-mode choice is no longer a safeguard against drift but a question of input regime (§1). Global remains a sound conservative default for recordings of unknown length, since anchoring both endpoints still bounds worst-case drift. **Subsequence** is preferred when the audio and score spans differ — participant tempo variation, untrimmed leading/trailing silence — and under $\Sigma_2$ it is robust even at full stem length, as the K515 cello result above shows.
+
+> [!NOTE]
+> **Literature check.** No published guideline prescribes a maximum recording duration for Subsequence DTW. The music-alignment literature treats sequence length as a computational constraint — DTW's quadratic cost motivates multiscale and segmented variants for *speed* (Müller, 2015) — and treats alignment drift as an algorithmic problem addressed by flexible boundary conditions and alignment-reliability estimation, not by a length limit. The short-excerpt figure in §1 reflects the study's recording *format*, not a stability limit of the current $\Sigma_2$ pipeline.
 
 ---
 
@@ -743,6 +783,8 @@ The values below are the **Engine Optimal Defaults** — the settings selected i
 | **Minimum Sustain Duration ($\theta_{sustain}$)** | $2\text{ frames}$ (pYIN); $4\text{ frames}$ (REAPER) | Minimum note length | Discards contiguous active islands shorter than this threshold. At 48 kHz with $H = 512$, 2 frames $\approx 21.3\text{ ms}$. | §4C, §3B | App. I |
 | **Maximum Pitch Slope ($\theta_{slope}$)** | $0.50\text{ semitones/frame}$ | Derivative threshold | Discards frames where the frame-to-frame pitch jump exceeds this limit. | §4B | App. H |
 | **Voicing Confidence Threshold** | $0.0$ (no filtering) | Estimator confidence | Discards frames whose pYIN voicing probability falls below the threshold. Has no graded effect under REAPER, whose voicing flag is binary. | §3A | App. G |
+| **DTW Alignment Mode** | Global (`Force Global` on) | Endpoint anchoring | Anchors both sequence endpoints, bounding cumulative warp drift; Subsequence relaxes them for tempo/length mismatch. *Override to Subsequence for the controlled short-excerpt protocol (§1).* | §6 | App. D |
+| **Adaptive RMS Gating** | Enabled ($\beta = 2.0$) | Session noise-floor tracking | Raises the static gate to $2 \cdot P_{10}(\text{RMS})$ wherever that floor is higher, tracking the recording's noise floor. *Override to disabled for controlled-studio, near-continuous solo material (§1).* | §4A | App. I |
 
 > [!NOTE]
 > The three tempo profiles (*Rapid / Virtuosic*, *Medium / Andante*, *Slow / Legato*) set $\theta_{slope} = 0.20$ and $\theta_{static} = 0.01$, varying only $\theta_{sustain}$ (1, 3 and 5 frames respectively). They are provided for Legacy-mode convenience and are **not** the configuration under which any result in this manual was produced. All reported figures use the Engine Optimal Default column above.
@@ -1025,9 +1067,9 @@ The following tables provide the exhaustive breakdown of the detection yield and
 > **Methodology Caveat: `AuSep_2_vn_09_Jesus`**
 > The verified pipeline reports a detected yield of 78.81% (REAPER) / 83.54% (pYIN) for this track, well below both engines' corpus averages and the only track outside K515 where pYIN's advantage over REAPER is under 5 pp. Duration capping, duration filtering (`min_frames`), the harmonic-folding exclusion rule, and DTW alignment mode have each been explicitly ruled out as the cause. The exclusion-threshold study of §7 locates it instead: 80 of this track's 486 notes are missed outright and 41 of those detected exceed 100 cents — a 10.1% gross-error rate, the second-highest in the corpus. The material, not the pipeline, is the limiting factor.
 
-> [!WARNING]
-> **Methodology Caveat: `AuSep_5_vc_44_K515`**
-> This dataset was evaluated using the application's default **Global DTW alignment mode**. As documented in §6, evaluating this specific 411-second cello track under *subsequence* DTW mode causes a catastrophic ~40 percentage point yield collapse due to cumulative temporal drift in the back half of the recording. Notably, the Violin 2 part from the same 411-second piece (`AuSep_2_vn_44_K515`) was unaffected under identical conditions, indicating the vulnerability is track-specific rather than duration-driven.
+> [!NOTE]
+> **Methodology note: `AuSep_5_vc_44_K515`**
+> This dataset was evaluated using the application's default **Global DTW alignment mode**. Under the *former* $\Sigma_1$ step pattern, this ~225-second cello track (360 notes) suffered a catastrophic ~40 pp yield collapse in *subsequence* mode from cumulative temporal drift; §6 documents that the current $\Sigma_2$ step pattern resolved it (subsequence now within ~3 pp of global on this stem). The Appendix A figures here are Global-mode and are unaffected either way. (Earlier revisions labeled this stem "411 seconds"; that was the score MIDI's nominal span — the audio is ~225 s.)
 
 #### REAPER Engine Results
 
@@ -1240,7 +1282,7 @@ Following a systematic review of the DTW chapter in Müller (2015), the step pat
 The validation was conducted on the complete Mozart String Quintet in C major, K.515 — all 5 instrumental parts (Violin I, Violin II, Viola I, Viola II, Cello) — using both the REAPER and pYIN pitch tracking engines for a total of 10 independent runs. The pipeline was identical to Appendix A: `extract_pitch_and_rms` → `analyze_intonation` → `process_dtw_alignment` → `calculate_dtw_metrics`, with `force_global=True`, `harmonic_folding=True`, and exclusion via `is_note_excluded()`.
 
 The K515 quintet was chosen as the validation set because:
-1. It is the longest piece in the URMP string dataset (411 seconds, 5 parts).
+1. It is the longest piece in the URMP string dataset (~225 seconds of audio; nominal score span ~405 s, 5 parts).
 2. It contains the track previously identified as most vulnerable to DTW alignment issues (Cello, `AuSep_5_vc_44_K515`).
 3. It spans all three string instrument types (Violin, Viola, Cello) across 5 parts with varying note density.
 
@@ -1957,7 +1999,7 @@ The engine's precision sits below even the optimistic end of the human range, by
 > [!NOTE]
 > **What this establishes.** Any intonation difference the engine reports as real is a difference a trained listener could in principle hear, and conversely the engine does not fail to resolve distinctions that a listener can make. The measurement is not the limiting factor in any comparison between the system and an ear.
 >
-> **What this does not establish.** It says nothing about whether the engine's *judgements* coincide with a listener's. Sufficient resolution is a necessary condition for criterion validity, not a demonstration of it. A perfectly precise instrument can still be measuring the wrong thing, or measuring the right thing against the wrong reference — and the engine's reference is equal temperament at $A = 440$, which is not what a performer tunes to in ensemble (§5, and the reference-pitch parameter of §9 exists precisely because that reference is a choice).
+> **What this does not establish.** It says nothing about whether the engine's *judgements* coincide with a listener's. Sufficient resolution is a necessary condition for criterion validity, not a demonstration of it. A perfectly precise instrument can still be measuring the wrong thing, or measuring the right thing against the wrong reference — and the engine's reference is equal temperament at $A = 440$, which is not what a performer tunes to in ensemble (the reference-pitch parameter of §9 exists precisely because that reference is a choice).
 
 ### 2. What Criterion Validation Would Require
 

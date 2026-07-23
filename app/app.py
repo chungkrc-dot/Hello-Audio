@@ -51,6 +51,16 @@ def main():
     
     st.title("Hello-Audio")
     st.warning("**Dataset & Instrument Caveat:** Hello-Audio is primarily designed, parameterized, and tested using the relevant instrument samples from the URMP dataset. As such, the application in its current state is strictly validated for **Violin, Viola, and Cello**. It should not be used to analyze other instruments without further calibration.")
+    st.info(
+        "**Purpose & measurement scope:** Hello-Audio was designed for one comparison — the "
+        "difference in **amplitude** and **intonation** when a performer plays **without earplugs "
+        "('Unplugged')** versus **with earplugs ('Plugged')**. Because those two quantities are the "
+        "effect under study, expressive variation that also moves loudness or pitch — dynamic "
+        "shading, tempo fluctuation, ornaments and vibrato — should be **minimised in the recorded "
+        "performances**, as it otherwise confounds the measurement. The engine still runs when such "
+        "expression is present, but the comparison is only clean when it is suppressed. See the "
+        "recording guidelines below."
+    )
     st.write("""
     This application comparatively analyzes the amplitude and intonation of uploaded audio recordings. 
     It uses the pYIN algorithm combined with strict Pitch Analyser Parameters (configured in the sidebar) to isolate clean, steady-state notes while aggressively filtering out transients, glissandos, and background noise.
@@ -59,7 +69,32 @@ def main():
     - **With MIDI Upload:** Unlocks the advanced **DTW Alignment Engine**, which mathematically aligns your performance to the true note-by-note MIDI targets and scores the deviation of the steady-state median pitch against the exact target.
     - **Without MIDI Upload:** Falls back to the general **Legacy Analysis Engine**, which evaluates intonation deviation by comparing your performed pitch to the nearest absolute semitone on the 12-TET scale.
     """)
-    
+
+    with st.expander("📋 Recording & Preparation Guidelines (read before collecting data)"):
+        st.markdown(
+            """
+Follow these guidelines so a single, fixed analysis configuration is valid for every take and the
+plugged-vs-unplugged comparison is not confounded by performance expression.
+
+**Performance**
+- **Fixed repertoire** per instrument — every participant plays the same score, so the comparison is within-material.
+- **Minimal expression:** steady dynamics (no crescendo/diminuendo), steady tempo (no *accelerando* / *ritardando*), **no ornaments**, and **no vibrato**. These modulate the very loudness and pitch the study measures.
+- **No click track needed.** Performers may play at their own steady tempo, near the score's written tempo.
+
+**Recording**
+- **Controlled acoustics:** a quiet, low-reverberation room. Keep microphone type, position and gain **identical** across the Plugged and Unplugged takes of the same performer and piece, and record both conditions in **one session**.
+- **Short excerpts:** keep each take short (**≤ ~2 minutes**). This is for data hygiene and easy re-runs, not alignment stability (the current pipeline aligns full-length takes fine).
+- **Clean attack:** start on an unambiguous first note; a short count-in helps alignment latch on.
+
+**Preparation for analysis**
+- **Trim** leading and trailing silence so the file begins at the first note and ends at the last. Room tone may be captured separately to document signal-to-noise ratio, but keep it **out of** the analysed region.
+
+**Recommended analysis settings for this protocol** (these deviate from the shipped defaults — see Technical Manual §1, §4A, §6):
+- **DTW:** *uncheck* **"Force Global DTW Alignment"** → use **Subsequence** DTW (absorbs participant tempo variation; short excerpts stay clear of the long-recording drift regime).
+- **Adaptive RMS:** *uncheck* **"Enable Adaptive RMS Threshold"** → use the static gate (controlled studio + near-continuous solo playing makes the adaptive floor over-gate real notes).
+            """
+        )
+
     # ==========================================
     # 1. File Uploads & State Management
     # ==========================================

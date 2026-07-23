@@ -95,12 +95,37 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     """
     st.sidebar.header("Pitch Analyser Parameters")
     
-    pitch_engine = st.sidebar.selectbox(
-        "Pitch Tracker Engine",
-        ["pYIN", "REAPER"],
-        help="Select the underlying pitch tracking algorithm. pYIN uses Hidden Markov Models, while REAPER uses Epoch tracking."
+    # Engine selection. pYIN is the validated default for all standard analysis;
+    # REAPER is a specialised secondary engine kept only for its one measured
+    # advantage — continuous (non-quantised) pitch for sub-10-cent microtonal work
+    # (Appendix B). It is placed behind an "Advanced" reveal so the common case
+    # needs no decision, rather than presented as an equal coin-flip.
+    st.sidebar.markdown("**Pitch Tracker Engine:** pYIN _(recommended)_")
+    st.sidebar.caption(
+        "pYIN (probabilistic YIN) is the validated default and leads note-detection "
+        "yield across violin, viola and cello. Use it for all standard intonation analysis."
     )
-    
+
+    with st.sidebar.expander("Advanced: alternative engine"):
+        use_reaper = st.checkbox(
+            "Use REAPER instead of pYIN",
+            value=False,
+            help="REAPER (Robust Epoch And Pitch EstimatoR) tracks pitch in the continuous "
+                 "time domain, so it resolves intonation finer than pYIN's 10-cent output grid."
+        )
+        st.caption(
+            "Switch to REAPER **only** when you need sub-10-cent microtonal precision on "
+            "deliberately detuned material — it is the more accurate engine for off-grid "
+            "shifts (Appendix B). For normal performance analysis pYIN is preferred: it "
+            "detects more notes and is far less prone to octave-tracking errors."
+        )
+
+    pitch_engine = "REAPER" if use_reaper else "pYIN"
+
+    if pitch_engine == "REAPER":
+        st.sidebar.info("⚙️ REAPER engine active — microtonal precision mode. "
+                        "Switch-probability and voicing-confidence controls are inactive.")
+
     preset = st.sidebar.selectbox(
         "Analysis Profile (Legacy Mode)",
         ["Engine Optimal Default", "Rapid / Virtuosic", "Medium / Andante", "Slow / Legato"],
@@ -357,7 +382,19 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
     """
     st.subheader("DTW Note-by-Note Intonation Metrics")
     st.caption("Use the checkboxes in the **Include** column to manually exclude corrupt notes (e.g. double-stops or tracking errors) from the Overall Summary calculation below. Unchecking a row will dynamically update the means.")
-    st.write("This table extracts the exact median frequency and deviation from the DTW-warped timeline, strictly bound to the MIDI note expectations.")
+    st.write(
+        "This table extracts the exact median frequency and deviation from the DTW-warped timeline, "
+        "strictly bound to the MIDI note expectations. Each row is one MIDI note; the **Detected (Hz)**, "
+        "**Dev (Hz)**, and **RMS (dBFS)** columns report the tracked pitch, its signed deviation from the "
+        "expected target, and the note's loudness for each condition."
+    )
+    st.write(
+        "The **Harmonic Fold** column reports any harmonic correction the pitch tracker applied "
+        "before scoring the note — an *Octave* (±12 semitones), *Perfect 5th* (3rd/6th-harmonic "
+        "confusion), or *Major 3rd* (5th-harmonic confusion) fold made when detection locked onto a "
+        "harmonic instead of the fundamental. **A blank cell is the normal case:** it means the "
+        "fundamental was tracked cleanly and no fold was needed."
+    )
     
     auto_exclude = st.checkbox(
         "Auto-exclude gross tracking errors (>1 semitone deviation)",
@@ -408,7 +445,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
             row["Unplugged Detected (Hz)"] = unp_note["Median_Detected_Pitch_Hz"]
             row["Unplugged Dev (Hz)"] = unp_note["Deviation_Hz"]
             row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
-            row["Unplugged Correction"] = corr_type_unp if corr_unp else ""
+            row["Unplugged Harmonic Fold"] = corr_type_unp if corr_unp else ""
             dev_hz_unp = unp_note["Deviation_Hz"]
             
         if dtw_metrics_plg and i < len(dtw_metrics_plg):
@@ -416,7 +453,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
             row["Plugged Detected (Hz)"] = plg_note["Median_Detected_Pitch_Hz"]
             row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
             row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
-            row["Plugged Correction"] = corr_type_plg if corr_plg else ""
+            row["Plugged Harmonic Fold"] = corr_type_plg if corr_plg else ""
             dev_hz_plg = plg_note["Deviation_Hz"]
             
         if dtw_metrics_unp and dtw_metrics_plg:
@@ -443,7 +480,17 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
                 "Include",
                 help="Select which notes to include in the overall summary means",
                 default=True,
-            )
+            ),
+            "Unplugged Harmonic Fold": st.column_config.TextColumn(
+                "Unplugged Harmonic Fold",
+                help="Harmonic correction applied before scoring (Octave / Perfect 5th / Major 3rd). "
+                     "Blank = fundamental tracked cleanly, no fold needed.",
+            ),
+            "Plugged Harmonic Fold": st.column_config.TextColumn(
+                "Plugged Harmonic Fold",
+                help="Harmonic correction applied before scoring (Octave / Perfect 5th / Major 3rd). "
+                     "Blank = fundamental tracked cleanly, no fold needed.",
+            ),
         },
         disabled=disabled_cols,
         width="stretch",
