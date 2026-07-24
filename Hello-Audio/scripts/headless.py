@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--no_locked_target", action="store_true", help="Disable Locked Target Rule")
     parser.add_argument("--force_global", action="store_true", help="Force Global DTW Alignment")
     parser.add_argument("--no_harmonic_folding", action="store_true", help="Disable Harmonic Folding (e.g., octaves, perfect 5ths)")
+    parser.add_argument("--reference_pitch", type=float, default=440.0, help="Reference pitch in Hz (default: 440.0). Use 441-443 for European orchestral tuning.")
     
     args = parser.parse_args()
     
@@ -43,10 +44,10 @@ def main():
     print(f"Loading Audio: {args.audio_path}")
     print(f"Extracting pitch for {args.instrument} (switch_prob={args.switch_prob})...")
     with open(args.audio_path, 'rb') as af:
-        y, sr, f0, voiced_flag, rms = extract_pitch_and_rms(
-            af, 
-            instrument=args.instrument, 
-            switch_prob=args.switch_prob, 
+        y, sr, f0, voiced_flag, rms, voicing_prob = extract_pitch_and_rms(
+            af,
+            instrument=args.instrument,
+            switch_prob=args.switch_prob,
             enable_freq_limits=not args.no_freq_limits
         )
     
@@ -60,11 +61,12 @@ def main():
     
     print("Applying intonation filters...")
     res = analyze_intonation(
-        y, sr, f0, voiced_flag, rms, 
-        rms_threshold=args.rms_threshold, 
-        min_frames=args.min_frames, 
-        max_pitch_slope=args.max_pitch_slope, 
-        toggles=toggles
+        y, sr, f0, voiced_flag, rms,
+        rms_threshold=args.rms_threshold,
+        min_frames=args.min_frames,
+        max_pitch_slope=args.max_pitch_slope,
+        toggles=toggles,
+        reference_pitch_hz=args.reference_pitch
     )
     final_mask = res['final_mask']
     
@@ -81,7 +83,7 @@ def main():
         folded_f0_hz = f0
         
     print("Calculating final metrics...\n")
-    dtw_metrics = calculate_dtw_metrics(midi_notes, time_array, folded_f0_hz, rms, final_mask, warped)
+    dtw_metrics = calculate_dtw_metrics(midi_notes, time_array, folded_f0_hz, rms, final_mask, warped, reference_pitch_hz=args.reference_pitch)
     
     print('--- DTW Alignment Metrics ---')
     for m in dtw_metrics:

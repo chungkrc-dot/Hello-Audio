@@ -126,7 +126,7 @@ def main():
         
         # 2. Extract raw pitch once per audio file
         with open(audio_path, 'rb') as af:
-            y, sr, f0, voiced_flag, rms = extract_pitch_and_rms(
+            y, sr, f0, voiced_flag, rms, _ = extract_pitch_and_rms(
                 af, 
                 instrument=instrument_name,
                 switch_prob=0.005,

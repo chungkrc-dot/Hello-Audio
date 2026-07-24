@@ -1,6 +1,26 @@
-streamlit
-librosa
-numpy
-pandas
-plotly
-matplotlib
+# Hello-Audio pinned dependencies.
+# Verified against Python 3.9.6 (macOS/arm64). Regenerate pins only after
+# re-running the full suite: python -m pytest -q  ->  69 passed.
+
+# --- Application ---
+streamlit==1.50.0
+plotly==6.9.0
+
+# --- Signal processing / pitch tracking ---
+librosa==0.11.0
+soundfile==0.13.1
+numpy==2.0.2
+scipy==1.13.1
+
+# REAPER pitch engine. Imported lazily in src/pitch_engine.py, so a missing
+# install only surfaces when the REAPER engine is selected in the UI. Builds
+# from an sdist (needs a C/C++ toolchain), which is why it is easy to lose
+# when the venv is rebuilt.
+pyreaper==0.0.11
+
+# --- Analysis / reporting ---
+pandas==2.3.3
+matplotlib==3.9.4
+
+# --- Tests ---
+pytest==8.4.2

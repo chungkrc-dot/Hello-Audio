@@ -17,12 +17,12 @@ def test_condition(base_audio, instrument, engine, cents, tempdir):
     sf.write(mod_path, y_mod, sr)
     
     with open(base_audio, 'rb') as af:
-        _, _, f0_base, v_base, _ = extract_pitch_and_rms(
+        _, _, f0_base, v_base, _, _ = extract_pitch_and_rms(
             af, instrument=instrument, switch_prob=0.005, enable_freq_limits=True, pitch_engine=engine
         )
         
     with open(mod_path, 'rb') as af:
-        _, _, f0_mod, v_mod, _ = extract_pitch_and_rms(
+        _, _, f0_mod, v_mod, _, _ = extract_pitch_and_rms(
             af, instrument=instrument, switch_prob=0.005, enable_freq_limits=True, pitch_engine=engine
         )
         

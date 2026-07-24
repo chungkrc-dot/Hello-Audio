@@ -74,7 +74,7 @@ def get_instrument_for_freq(f):
 # --- Analysis Helper ---
 def analyze(buf, engine, freq):
     inst = get_instrument_for_freq(freq)
-    _, _, f0, v, _ = extract_pitch_and_rms(
+    _, _, f0, v, _, _ = extract_pitch_and_rms(
         buf, instrument=inst, switch_prob=0.01, enable_freq_limits=True, pitch_engine=engine
     )
     # Middle 80%
@@ -205,7 +205,7 @@ def run_tests():
     buf = generate_vibrato(440.0)
     for engine in ["pYIN", "REAPER"]:
         inst = get_instrument_for_freq(440.0)
-        _, _, f0, v, _ = extract_pitch_and_rms(buf, inst, 0.01, enable_freq_limits=True, pitch_engine=engine)
+        _, _, f0, v, _, _ = extract_pitch_and_rms(buf, inst, 0.01, enable_freq_limits=True, pitch_engine=engine)
         buf.seek(0)
         start, end = int(len(f0)*0.1), int(len(f0)*0.9)
         f0_valid = f0[start:end][v[start:end]]

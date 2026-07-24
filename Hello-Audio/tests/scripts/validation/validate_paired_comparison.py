@@ -109,8 +109,8 @@ def main():
     
     toggles = {'freq_limits': True, 'slope_filter': True, 'duration_filter': True, 'locked_target': True}
     
-    _, _, f0_unp, v_unp, rms_unp = extract_pitch_and_rms(buf_unp, "Violin", 0.005)
-    _, _, f0_plg, v_plg, rms_plg = extract_pitch_and_rms(buf_plg, "Violin", 0.005)
+    _, _, f0_unp, v_unp, rms_unp, _ = extract_pitch_and_rms(buf_unp, "Violin", 0.005)
+    _, _, f0_plg, v_plg, rms_plg, _ = extract_pitch_and_rms(buf_plg, "Violin", 0.005)
     
     res_unp_1 = analyze_intonation(y_unp, sr, f0_unp, v_unp, rms_unp, toggles=toggles)
     res_unp_1.update(analyze_amplitude(y_unp, sr))
@@ -156,7 +156,7 @@ def main():
     y_plg_harsh = scipy.signal.lfilter(b, a, y_plg_harsh)
     buf_plg_harsh = to_bytesio(y_plg_harsh, sr)
     
-    _, _, f0_plg_h, v_plg_h, rms_plg_h = extract_pitch_and_rms(buf_plg_harsh, "Violin", 0.005)
+    _, _, f0_plg_h, v_plg_h, rms_plg_h, _ = extract_pitch_and_rms(buf_plg_harsh, "Violin", 0.005)
     res_plg_3 = analyze_intonation(y_plg_harsh, sr, f0_plg_h, v_plg_h, rms_plg_h, toggles=toggles)
     res_plg_3.update(analyze_amplitude(y_plg_harsh, sr))
     
@@ -195,7 +195,7 @@ def main():
     offsets_dtw_plg[2] += 1200.0
     y_dtw_plg, _ = generate_tone_sequence_with_offsets(notes, durations, offsets_dtw_plg)
     buf_dtw_plg = to_bytesio(y_dtw_plg, sr)
-    _, _, f0_dtw_plg, v_dtw_plg, rms_dtw_plg = extract_pitch_and_rms(buf_dtw_plg, "Violin", 0.005)
+    _, _, f0_dtw_plg, v_dtw_plg, rms_dtw_plg, _ = extract_pitch_and_rms(buf_dtw_plg, "Violin", 0.005)
     res_dtw_plg = analyze_intonation(y_dtw_plg, sr, f0_dtw_plg, v_dtw_plg, rms_dtw_plg, toggles=toggles)
     
     time_array_plg, expected_plg, warped_plg, expected_note_index_plg, folded_f0_hz_plg, folded_f0_midi_plg, strict_mask_plg, correction_array_plg = process_dtw_alignment(
@@ -211,7 +211,7 @@ def main():
     offsets_dtw_plg_4b[3] += 1900.0
     y_dtw_plg_4b, _ = generate_tone_sequence_with_offsets(notes, durations, offsets_dtw_plg_4b)
     buf_dtw_plg_4b = to_bytesio(y_dtw_plg_4b, sr)
-    _, _, f0_dtw_plg_4b, v_dtw_plg_4b, rms_dtw_plg_4b = extract_pitch_and_rms(buf_dtw_plg_4b, "Violin", 0.005)
+    _, _, f0_dtw_plg_4b, v_dtw_plg_4b, rms_dtw_plg_4b, _ = extract_pitch_and_rms(buf_dtw_plg_4b, "Violin", 0.005)
     res_dtw_plg_4b = analyze_intonation(y_dtw_plg_4b, sr, f0_dtw_plg_4b, v_dtw_plg_4b, rms_dtw_plg_4b, toggles=toggles)
     
     time_array_plg_4b, expected_plg_4b, warped_plg_4b, expected_note_index_plg_4b, folded_f0_hz_plg_4b, folded_f0_midi_plg_4b, strict_mask_plg_4b, correction_array_plg_4b = process_dtw_alignment(

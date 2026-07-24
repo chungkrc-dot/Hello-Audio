@@ -10,7 +10,84 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from itertools import zip_longest
-from src.midi_alignment import is_note_excluded
+from src.midi_alignment import (
+    is_note_excluded, summarize_dtw_metrics, low_detection_yield_warning,
+)
+from src.stats_summary import PYIN_RESOLUTION_CENTS, TRIM_PROPORTION
+
+# Rows of the distributional summary tables, in reporting order.
+# (stat key, display label, format string)
+DEVIATION_STAT_ROWS = [
+    ("n",        "Sample size (n)",             "{:.0f}"),
+    ("mean",     "Mean",                        "{:.2f}"),
+    ("std",      "Standard deviation",          "{:.2f}"),
+    ("sem",      "Standard error of the mean",  "{:.2f}"),
+    ("median",   "Median",                      "{:.2f}"),
+    ("q1",       "1st quartile (Q1)",           "{:.2f}"),
+    ("q3",       "3rd quartile (Q3)",           "{:.2f}"),
+    ("iqr",      "Interquartile range (IQR)",   "{:.2f}"),
+    ("mad",      "Median absolute deviation",   "{:.2f}"),
+    ("trimmed_mean", f"{TRIM_PROPORTION:.0%}-trimmed mean", "{:.2f}"),
+    ("skewness", "Skewness (G1)",               "{:.3f}"),
+    ("kurtosis", "Excess kurtosis (G2)",        "{:.3f}"),
+    ("min",      "Minimum",                     "{:.2f}"),
+    ("max",      "Maximum",                     "{:.2f}"),
+]
+
+DISTRIBUTION_CAPTION = (
+    "**Skewness (G1)** is 0 for a symmetric distribution; positive values mean the sharp "
+    "(above-target) tail is the longer one. **Excess kurtosis (G2)** is 0 for a Gaussian; "
+    "positive values mean heavier tails than normal, so the mean and standard deviation "
+    "understate how often large errors occur and the median/IQR pair is the more honest "
+    "summary. Both are bias-corrected sample estimators."
+)
+
+
+def render_deviation_statistics_table(stats_by_condition, unit_label, caption_key,
+                                      note_resolution=False):
+    """
+    Renders a statistic-per-row table comparing the full deviation distribution
+    across conditions. `stats_by_condition` maps a condition name to a dict of
+    the un-prefixed statistic keys produced by src.stats_summary.descriptive_stats.
+    """
+    if not stats_by_condition:
+        return
+
+    table = {}
+    for condition, stats in stats_by_condition.items():
+        column = []
+        for key, _label, fmt in DEVIATION_STAT_ROWS:
+            value = stats.get(key, np.nan)
+            column.append("N/A" if value is None or pd.isna(value) else fmt.format(value))
+        table[condition] = column
+
+    df = pd.DataFrame(table, index=[label for _k, label, _f in DEVIATION_STAT_ROWS])
+    df.index.name = f"Statistic ({unit_label})"
+
+    st.dataframe(df, width="stretch")
+
+    csv = df.to_csv().encode('utf-8')
+    st.download_button(
+        label=f"Download Distribution Statistics ({unit_label}) as CSV",
+        data=csv,
+        file_name=f'deviation_distribution_stats_{caption_key}.csv',
+        mime='text/csv',
+        key=f'dl_dist_{caption_key}'
+    )
+
+    if note_resolution:
+        st.caption(
+            f"**Resolution floor:** pYIN decodes pitch on a fixed grid of "
+            f"{PYIN_RESOLUTION_CENTS:.0f} cents, so frame deviations are exact multiples of "
+            f"{PYIN_RESOLUTION_CENTS:.0f} cents and per-note medians land on a 5-cent lattice. "
+            "The median, quartiles and IQR are order statistics: they can only ever return a "
+            "lattice value, and on large note populations they stop moving altogether. Treat "
+            "them as naming a grid cell, not as measurements to two decimal places. The mean "
+            f"and the {TRIM_PROPORTION:.0%}-trimmed mean are averages of many lattice values, "
+            "so they dither off the grid and keep full resolution — the trimmed mean is the "
+            "one to quote when the distribution is heavy-tailed. REAPER returns continuous f0 "
+            "and has no such floor."
+        )
 
 def render_sidebar_parameters(is_midi_uploaded=False):
     """
@@ -18,12 +95,37 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     """
     st.sidebar.header("Pitch Analyser Parameters")
     
-    pitch_engine = st.sidebar.selectbox(
-        "Pitch Tracker Engine",
-        ["pYIN", "REAPER"],
-        help="Select the underlying pitch tracking algorithm. pYIN uses Hidden Markov Models, while REAPER uses Epoch tracking."
+    # Engine selection. pYIN is the validated default for all standard analysis;
+    # REAPER is a specialised secondary engine kept only for its one measured
+    # advantage — continuous (non-quantised) pitch for sub-10-cent microtonal work
+    # (Appendix B). It is placed behind an "Advanced" reveal so the common case
+    # needs no decision, rather than presented as an equal coin-flip.
+    st.sidebar.markdown("**Pitch Tracker Engine:** pYIN _(recommended)_")
+    st.sidebar.caption(
+        "pYIN (probabilistic YIN) is the validated default and leads note-detection "
+        "yield across violin, viola and cello. Use it for all standard intonation analysis."
     )
-    
+
+    with st.sidebar.expander("Advanced: alternative engine"):
+        use_reaper = st.checkbox(
+            "Use REAPER instead of pYIN",
+            value=False,
+            help="REAPER (Robust Epoch And Pitch EstimatoR) tracks pitch in the continuous "
+                 "time domain, so it resolves intonation finer than pYIN's 10-cent output grid."
+        )
+        st.caption(
+            "Switch to REAPER **only** when you need sub-10-cent microtonal precision on "
+            "deliberately detuned material — it is the more accurate engine for off-grid "
+            "shifts (Appendix B). For normal performance analysis pYIN is preferred: it "
+            "detects more notes and is far less prone to octave-tracking errors."
+        )
+
+    pitch_engine = "REAPER" if use_reaper else "pYIN"
+
+    if pitch_engine == "REAPER":
+        st.sidebar.info("⚙️ REAPER engine active — microtonal precision mode. "
+                        "Switch-probability and voicing-confidence controls are inactive.")
+
     preset = st.sidebar.selectbox(
         "Analysis Profile (Legacy Mode)",
         ["Engine Optimal Default", "Rapid / Virtuosic", "Medium / Andante", "Slow / Legato"],
@@ -52,7 +154,18 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     instrument = st.sidebar.selectbox(
         "Select Instrument",
         ["Violin", "Viola", "Cello"],
+        key="selected_instrument",
         help="Sets the appropriate frequency detection range for the instrument."
+    )
+
+    reference_pitch_hz = st.sidebar.number_input(
+        "Reference Pitch (Hz)",
+        min_value=430.0,
+        max_value=450.0,
+        value=440.0,
+        step=0.5,
+        format="%.1f",
+        help="Concert A reference frequency. Standard orchestral tuning is A=440 Hz. Many European ensembles tune to A=441–443 Hz."
     )
 
     switch_prob = st.sidebar.number_input(
@@ -87,13 +200,25 @@ def render_sidebar_parameters(is_midi_uploaded=False):
     )
 
     max_pitch_slope = st.sidebar.number_input(
-        "Maximum Pitch Slope (semitones)", 
-        min_value=0.01, 
-        max_value=1.00, 
-        value=def_slope, 
+        "Maximum Pitch Slope (semitones)",
+        min_value=0.01,
+        max_value=1.00,
+        value=def_slope,
         step=0.01,
         disabled=disabled,
         help="Discards frames where the frame-to-frame pitch jump exceeds this limit. Filters out transients and glissandi."
+    )
+
+    confidence_threshold = st.sidebar.number_input(
+        "Voicing Confidence Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.0,
+        step=0.05,
+        format="%.2f",
+        disabled=(pitch_engine == "REAPER"),
+        help="Minimum pYIN voicing probability for a frame to be included. 0.0 preserves default behavior (no filtering). "
+             "Higher values discard uncertain frames. Has no effect with REAPER (binary voicing only)."
     )
 
     # ==========================================
@@ -121,11 +246,21 @@ def render_sidebar_parameters(is_midi_uploaded=False):
         "adaptive_rms": enable_adaptive_rms
     }
     
-    return pitch_engine, instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles
+    return pitch_engine, instrument, reference_pitch_hz, switch_prob, rms_threshold, min_frames, max_pitch_slope, confidence_threshold, toggles
 
 def get_val(res_dict, key):
     """Helper to safely extract a value from the results dictionary."""
     return res_dict[key] if res_dict and key in res_dict else np.nan
+
+def _unprefix(res_dict, prefix):
+    """
+    Recovers a plain statistics dict from the flattened, prefixed keys stored in a
+    results dict (e.g. 'dev_cents_median' -> 'median').
+    """
+    if not res_dict:
+        return {}
+    head = f"{prefix}_"
+    return {k[len(head):]: v for k, v in res_dict.items() if k.startswith(head)}
 
 def render_results_table(res_unp, res_plg, unp_ok, plg_ok):
     """
@@ -183,6 +318,30 @@ def render_results_table(res_unp, res_plg, unp_ok, plg_ok):
         msg += f" {res_plg['frame_count']} frames (Plugged)"
     st.success(msg + ".")
 
+    # --- Distributional summary ---
+    # The table above reports means only. Frame-level cent deviations are strongly
+    # non-normal (vibrato produces broad shoulders, residual tracking errors produce
+    # heavy tails), so the robust and shape statistics are reported separately.
+    st.write("**Deviation Distribution Statistics (Legacy)**")
+
+    cents_stats = {}
+    hz_stats = {}
+    if unp_ok:
+        cents_stats["Unplugged"] = _unprefix(res_unp, 'dev_cents')
+        hz_stats["Unplugged"] = _unprefix(res_unp, 'dev_hz')
+    if plg_ok:
+        cents_stats["Plugged"] = _unprefix(res_plg, 'dev_cents')
+        hz_stats["Plugged"] = _unprefix(res_plg, 'dev_hz')
+
+    tab_cents, tab_hz = st.tabs(["Cents", "Hertz"])
+    with tab_cents:
+        render_deviation_statistics_table(cents_stats, "cents", "legacy_cents",
+                                          note_resolution=True)
+    with tab_hz:
+        render_deviation_statistics_table(hz_stats, "Hz", "legacy_hz")
+
+    st.caption(DISTRIBUTION_CAPTION)
+
 def render_sequence_comparison(midi_seq, unp_seq, plg_seq):
     """
     Renders the Note Sequence Comparison table.
@@ -223,7 +382,19 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
     """
     st.subheader("DTW Note-by-Note Intonation Metrics")
     st.caption("Use the checkboxes in the **Include** column to manually exclude corrupt notes (e.g. double-stops or tracking errors) from the Overall Summary calculation below. Unchecking a row will dynamically update the means.")
-    st.write("This table extracts the exact median frequency and deviation from the DTW-warped timeline, strictly bound to the MIDI note expectations.")
+    st.write(
+        "This table extracts the exact median frequency and deviation from the DTW-warped timeline, "
+        "strictly bound to the MIDI note expectations. Each row is one MIDI note; the **Detected (Hz)**, "
+        "**Dev (Hz)**, and **RMS (dBFS)** columns report the tracked pitch, its signed deviation from the "
+        "expected target, and the note's loudness for each condition."
+    )
+    st.write(
+        "The **Harmonic Fold** column reports any harmonic correction the pitch tracker applied "
+        "before scoring the note — an *Octave* (±12 semitones), *Perfect 5th* (3rd/6th-harmonic "
+        "confusion), or *Major 3rd* (5th-harmonic confusion) fold made when detection locked onto a "
+        "harmonic instead of the fundamental. **A blank cell is the normal case:** it means the "
+        "fundamental was tracked cleanly and no fold was needed."
+    )
     
     auto_exclude = st.checkbox(
         "Auto-exclude gross tracking errors (>1 semitone deviation)",
@@ -274,7 +445,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
             row["Unplugged Detected (Hz)"] = unp_note["Median_Detected_Pitch_Hz"]
             row["Unplugged Dev (Hz)"] = unp_note["Deviation_Hz"]
             row["Unplugged RMS (dBFS)"] = unp_note["Median_RMS_dBFS"]
-            row["Unplugged Correction"] = corr_type_unp if corr_unp else ""
+            row["Unplugged Harmonic Fold"] = corr_type_unp if corr_unp else ""
             dev_hz_unp = unp_note["Deviation_Hz"]
             
         if dtw_metrics_plg and i < len(dtw_metrics_plg):
@@ -282,7 +453,7 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
             row["Plugged Detected (Hz)"] = plg_note["Median_Detected_Pitch_Hz"]
             row["Plugged Dev (Hz)"] = plg_note["Deviation_Hz"]
             row["Plugged RMS (dBFS)"] = plg_note["Median_RMS_dBFS"]
-            row["Plugged Correction"] = corr_type_plg if corr_plg else ""
+            row["Plugged Harmonic Fold"] = corr_type_plg if corr_plg else ""
             dev_hz_plg = plg_note["Deviation_Hz"]
             
         if dtw_metrics_unp and dtw_metrics_plg:
@@ -309,7 +480,17 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
                 "Include",
                 help="Select which notes to include in the overall summary means",
                 default=True,
-            )
+            ),
+            "Unplugged Harmonic Fold": st.column_config.TextColumn(
+                "Unplugged Harmonic Fold",
+                help="Harmonic correction applied before scoring (Octave / Perfect 5th / Major 3rd). "
+                     "Blank = fundamental tracked cleanly, no fold needed.",
+            ),
+            "Plugged Harmonic Fold": st.column_config.TextColumn(
+                "Plugged Harmonic Fold",
+                help="Harmonic correction applied before scoring (Octave / Perfect 5th / Major 3rd). "
+                     "Blank = fundamental tracked cleanly, no fold needed.",
+            ),
         },
         disabled=disabled_cols,
         width="stretch",
@@ -328,7 +509,8 @@ def render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg):
     
     return excluded_indices
 
-def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=None):
+def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=None,
+                             pitch_engine=None):
     """
     Renders an overall performance summary table aggregating the note-by-note DTW metrics.
     Includes Delta calculation between Unplugged and Plugged conditions.
@@ -342,66 +524,38 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     st.write("**Overall DTW Performance Summary**")
     
     summary_data = []
-    
-    def calculate_means(metrics):
-        if not metrics:
-            return {
-                "Notes Detected (%)": np.nan,
-                "Notes Included (%)": np.nan,
-                "mean RMS amplitude (dB FS)": np.nan, 
-                "mean RMS amplitude (dB A)": np.nan, 
-                "mean intonation deviation (Hz)": np.nan, 
-                "mean intonation deviation (cents)": np.nan
-            }
-            
-        total_expected = len(metrics)
-        detected_count = sum(1 for m in metrics if not pd.isna(m["Deviation_Cents"]))
-        
-        filtered_metrics = [m for m in metrics if m["Note_Index"] not in excluded_indices]
-        
-        included_count = sum(1 for m in filtered_metrics if not pd.isna(m["Deviation_Cents"]))
-        
-        pct_detected = (detected_count / total_expected * 100) if total_expected > 0 else np.nan
-        pct_included = (included_count / detected_count * 100) if detected_count > 0 else np.nan
-        
-        if not filtered_metrics:
-            return {
-                "Notes Detected (%)": pct_detected,
-                "Notes Included (%)": pct_included,
-                "mean RMS amplitude (dB FS)": np.nan, 
-                "mean RMS amplitude (dB A)": np.nan, 
-                "mean intonation deviation (Hz)": np.nan, 
-                "mean intonation deviation (cents)": np.nan
-            }
-            
-        df = pd.DataFrame(filtered_metrics)
+
+    # Aggregation lives in src/midi_alignment.summarize_dtw_metrics() so the UI,
+    # the headless CLI and the validation scripts all report the same numbers.
+    unp_summary = summarize_dtw_metrics(dtw_metrics_unp, excluded_indices)
+    plg_summary = summarize_dtw_metrics(dtw_metrics_plg, excluded_indices)
+
+    def as_row(summary):
         return {
-            "Notes Detected (%)": pct_detected,
-            "Notes Included (%)": pct_included,
-            "mean RMS amplitude (dB FS)": df["Median_RMS_dBFS"].mean(),
-            "mean RMS amplitude (dB A)": df["Median_RMS_dBA"].mean(),
-            "mean intonation deviation (Hz)": df["Deviation_Hz"].mean(),
-            "mean intonation deviation (cents)": df["Deviation_Cents"].mean(),
+            "Notes Detected (%)": summary["pct_detected"],
+            "Notes Included (%)": summary["pct_included"],
+            "mean RMS amplitude (dB FS)": summary["mean_rms_dbfs"],
+            "mean RMS amplitude (dB A)": summary["mean_rms_dba"],
+            "mean intonation deviation (Hz)": summary["dev_hz_mean"],
+            "mean intonation deviation (cents)": summary["dev_cents_mean"],
+            "median intonation deviation (cents)": summary["dev_cents_median"],
+            "IQR of deviation (cents)": summary["dev_cents_iqr"],
         }
-        
-    unp_means = calculate_means(dtw_metrics_unp)
-    plg_means = calculate_means(dtw_metrics_plg)
-    
+
+    unp_means = as_row(unp_summary)
+    plg_means = as_row(plg_summary)
+
     unp_means["Condition"] = "Unplugged"
     plg_means["Condition"] = "Plugged"
-    
+
     summary_data.append(unp_means)
     summary_data.append(plg_means)
     
-    delta = {
-        "Condition": "Delta (Unplugged - Plugged)",
-        "Notes Detected (%)": unp_means["Notes Detected (%)"] - plg_means["Notes Detected (%)"],
-        "Notes Included (%)": unp_means["Notes Included (%)"] - plg_means["Notes Included (%)"],
-        "mean RMS amplitude (dB FS)": unp_means["mean RMS amplitude (dB FS)"] - plg_means["mean RMS amplitude (dB FS)"],
-        "mean RMS amplitude (dB A)": unp_means["mean RMS amplitude (dB A)"] - plg_means["mean RMS amplitude (dB A)"],
-        "mean intonation deviation (Hz)": unp_means["mean intonation deviation (Hz)"] - plg_means["mean intonation deviation (Hz)"],
-        "mean intonation deviation (cents)": unp_means["mean intonation deviation (cents)"] - plg_means["mean intonation deviation (cents)"]
-    }
+    delta = {"Condition": "Delta (Unplugged - Plugged)"}
+    for key in unp_means:
+        if key == "Condition":
+            continue
+        delta[key] = unp_means[key] - plg_means[key]
     summary_data.append(delta)
     
     df_summary = pd.DataFrame(summary_data)
@@ -420,5 +574,35 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     
     st.caption("**Notes Detected (%)**: The percentage of expected MIDI notes that were successfully extracted by the pitch tracking algorithm.\n\n"
                "**Notes Included (%)**: The percentage of *detected notes* that successfully passed all algorithmic tracking filters (and manual exclusions) to contribute to the mean deviation calculations above.")
+
+    # Advisory: a very low detection yield is the only signal that catches a
+    # same-instrument part swap, which the tessitura check cannot see.
+    for label, summary in (("Unplugged", unp_summary), ("Plugged", plg_summary)):
+        msg = low_detection_yield_warning(summary["pct_detected"], pitch_engine)
+        if msg:
+            st.warning(f"**{label}:** {msg}")
+
+    # --- Distributional summary ---
+    st.write("**Deviation Distribution Statistics (DTW)**")
+
+    cents_stats = {}
+    hz_stats = {}
+    if dtw_metrics_unp:
+        cents_stats["Unplugged"] = _unprefix(unp_summary, 'dev_cents')
+        hz_stats["Unplugged"] = _unprefix(unp_summary, 'dev_hz')
+    if dtw_metrics_plg:
+        cents_stats["Plugged"] = _unprefix(plg_summary, 'dev_cents')
+        hz_stats["Plugged"] = _unprefix(plg_summary, 'dev_hz')
+
+    tab_cents, tab_hz = st.tabs(["Cents", "Hertz"])
+    with tab_cents:
+        render_deviation_statistics_table(cents_stats, "cents", "dtw_cents",
+                                          note_resolution=True)
+    with tab_hz:
+        render_deviation_statistics_table(hz_stats, "Hz", "dtw_hz")
+
+    st.caption(DISTRIBUTION_CAPTION)
+
+    return unp_summary, plg_summary
 
 

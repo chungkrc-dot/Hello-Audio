@@ -66,7 +66,7 @@ def analyze_track():
             print(f"  -> Testing {engine}...")
             
             with open(wav_path, 'rb') as af:
-                y, sr, f0, voiced_flag, rms = extract_pitch_and_rms(
+                y, sr, f0, voiced_flag, rms, voicing_prob = extract_pitch_and_rms(
                     af, instrument=inst, switch_prob=params['switch_prob'],
                     enable_freq_limits=toggles['freq_limits'], pitch_engine=engine
                 )

@@ -1,1 +1,31 @@
 dataset (Strings only)/
+
+# Generated run artifacts. Validation reports under tests/scripts/validation/
+# are tracked deliberately — the technical manual cites them — and the
+# certification proof figures below are embedded in the manual.
+tests/outputs/*
+!tests/outputs/certification_reports/
+
+# The batch CSVs are small and are tracked: the manual's Appendix A tables are
+# rendered from appendix_a_results.csv, test_no_corpus_stem_triggers_the_warning
+# reads it, and appendix_a_results_sigma1.csv is the only surviving record of the
+# Sigma-1 configuration that Appendix D compares against. The per-note
+# diagnostics JSONs beside them are large and stay ignored.
+!tests/outputs/batch_results/
+tests/outputs/batch_results/*
+!tests/outputs/batch_results/*.csv
+
+# Scratch / working material
+scratch/
+appendix_a_draft.md
+calc_stats.py
+run_batch.sh
+string_instruments_summary.txt
+
+# Python environment
+venv/
+__pycache__/
+*.py[cod]
+
+# OS
+.DS_Store

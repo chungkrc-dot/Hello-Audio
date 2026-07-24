@@ -51,6 +51,16 @@ def main():
     
     st.title("Hello-Audio")
     st.warning("**Dataset & Instrument Caveat:** Hello-Audio is primarily designed, parameterized, and tested using the relevant instrument samples from the URMP dataset. As such, the application in its current state is strictly validated for **Violin, Viola, and Cello**. It should not be used to analyze other instruments without further calibration.")
+    st.info(
+        "**Purpose & measurement scope:** Hello-Audio was designed for one comparison — the "
+        "difference in **amplitude** and **intonation** when a performer plays **without earplugs "
+        "('Unplugged')** versus **with earplugs ('Plugged')**. Because those two quantities are the "
+        "effect under study, expressive variation that also moves loudness or pitch — dynamic "
+        "shading, tempo fluctuation, ornaments and vibrato — should be **minimised in the recorded "
+        "performances**, as it otherwise confounds the measurement. The engine still runs when such "
+        "expression is present, but the comparison is only clean when it is suppressed. See the "
+        "recording guidelines below."
+    )
     st.write("""
     This application comparatively analyzes the amplitude and intonation of uploaded audio recordings. 
     It uses the pYIN algorithm combined with strict Pitch Analyser Parameters (configured in the sidebar) to isolate clean, steady-state notes while aggressively filtering out transients, glissandos, and background noise.
@@ -59,7 +69,32 @@ def main():
     - **With MIDI Upload:** Unlocks the advanced **DTW Alignment Engine**, which mathematically aligns your performance to the true note-by-note MIDI targets and scores the deviation of the steady-state median pitch against the exact target.
     - **Without MIDI Upload:** Falls back to the general **Legacy Analysis Engine**, which evaluates intonation deviation by comparing your performed pitch to the nearest absolute semitone on the 12-TET scale.
     """)
-    
+
+    with st.expander("📋 Recording & Preparation Guidelines (read before collecting data)"):
+        st.markdown(
+            """
+Follow these guidelines so a single, fixed analysis configuration is valid for every take and the
+plugged-vs-unplugged comparison is not confounded by performance expression.
+
+**Performance**
+- **Fixed repertoire** per instrument — every participant plays the same score, so the comparison is within-material.
+- **Minimal expression:** steady dynamics (no crescendo/diminuendo), steady tempo (no *accelerando* / *ritardando*), **no ornaments**, and **no vibrato**. These modulate the very loudness and pitch the study measures.
+- **No click track needed.** Performers may play at their own steady tempo, near the score's written tempo.
+
+**Recording**
+- **Controlled acoustics:** a quiet, low-reverberation room. Keep microphone type, position and gain **identical** across the Plugged and Unplugged takes of the same performer and piece, and record both conditions in **one session**.
+- **Short excerpts:** keep each take short (**≤ ~2 minutes**). This is for data hygiene and easy re-runs, not alignment stability (the current pipeline aligns full-length takes fine).
+- **Clean attack:** start on an unambiguous first note; a short count-in helps alignment latch on.
+
+**Preparation for analysis**
+- **Trim** leading and trailing silence so the file begins at the first note and ends at the last. Room tone may be captured separately to document signal-to-noise ratio, but keep it **out of** the analysed region.
+
+**Recommended analysis settings for this protocol** (these deviate from the shipped defaults — see Technical Manual §1, §4A, §6):
+- **DTW:** *uncheck* **"Force Global DTW Alignment"** → use **Subsequence** DTW (absorbs participant tempo variation; short excerpts stay clear of the long-recording drift regime).
+- **Adaptive RMS:** *uncheck* **"Enable Adaptive RMS Threshold"** → use the static gate (controlled studio + near-continuous solo playing makes the adaptive floor over-gate real notes).
+            """
+        )
+
     # ==========================================
     # 1. File Uploads & State Management
     # ==========================================
@@ -74,19 +109,52 @@ def main():
     with col_u3:
         file_midi = st.file_uploader("Upload MIDI Reference (Optional)", type=["mid", "midi"])
         if file_midi is not None:
-            from src.midi_parser import get_midi_tracks
-            tracks = get_midi_tracks(file_midi)
-            if len(tracks) > 1:
+            from src.midi_parser import (
+                describe_midi_tracks, format_track_label,
+                fits_instrument, best_fitting_instrument,
+            )
+            # The instrument selector lives in the sidebar, which is rendered
+            # after this block; read the committed value so track labels can be
+            # annotated against it on every rerun after the first.
+            sel_instrument = st.session_state.get("selected_instrument")
+            tracks = describe_midi_tracks(file_midi)
+
+            if not tracks:
+                st.error("This MIDI file contains no note events.")
+            elif len(tracks) == 1:
+                # A single-part MIDI is assumed to be the correct part — the
+                # assumption the application is built on. No prompt is shown.
+                target_track = next(iter(tracks))
+            else:
                 track_options = list(tracks.keys())
-                track_labels = [tracks[t] for t in track_options]
-                selected_label = st.selectbox("Select Track to Analyze", track_labels)
+                track_labels = [format_track_label(t, tracks[t], sel_instrument)
+                                for t in track_options]
+                selected_label = st.selectbox(
+                    "Select Track to Analyze", track_labels,
+                    help="This MIDI holds several parts (a condensed score). Pick the "
+                         "one matching the uploaded audio — the pitch range and duration "
+                         "shown are the best guide."
+                )
                 target_track = track_options[track_labels.index(selected_label)]
+
+            # Advisory only: transposing parts and scordatura are legitimate, so
+            # never block the run on a range mismatch.
+            if target_track is not None and sel_instrument:
+                entry = tracks[target_track]
+                if not fits_instrument(entry['lo'], entry['hi'], sel_instrument):
+                    alt = best_fitting_instrument(entry['lo'], entry['hi'])
+                    st.warning(
+                        f"Track {target_track} spans {entry['lo_note']}–{entry['hi_note']}, "
+                        f"outside the expected range for {sel_instrument}"
+                        + (f" (it fits {alt.capitalize()})." if alt else ".")
+                        + " Check that this is the right part before analysing."
+                    )
 
     # ==========================================
     # 2. Sidebar Parameters
     # ==========================================
     # 1. SIDEBAR PARAMETERS
-    pitch_engine, instrument, switch_prob, rms_threshold, min_frames, max_pitch_slope, toggles = render_sidebar_parameters(is_midi_uploaded=(file_midi is not None))
+    pitch_engine, instrument, reference_pitch_hz, switch_prob, rms_threshold, min_frames, max_pitch_slope, confidence_threshold, toggles = render_sidebar_parameters(is_midi_uploaded=(file_midi is not None))
     
     # Check if core parameters changed
     enable_freq_limits = toggles.get('freq_limits', True)
@@ -114,6 +182,7 @@ def main():
     # Detect Parameter Changes to Invalidate Cache
     current_params = {
         'instrument': instrument,
+        'reference_pitch_hz': reference_pitch_hz,
         'switch_prob': switch_prob,
         'rms_threshold': rms_threshold,
         'min_frames': min_frames,
@@ -164,7 +233,7 @@ def main():
             if file_unplugged is not None and 'extracted_unp' not in st.session_state:
                 with st.spinner("Extracting Pitch (Unplugged) using pYIN..."):
                     st.session_state['extracted_unp'] = extract_pitch_and_rms(file_unplugged, instrument, switch_prob, enable_freq_limits, pitch_engine=pitch_engine)
-                    
+
             if file_plugged is not None and 'extracted_plg' not in st.session_state:
                 with st.spinner("Extracting Pitch (Plugged) using pYIN..."):
                     st.session_state['extracted_plg'] = extract_pitch_and_rms(file_plugged, instrument, switch_prob, enable_freq_limits, pitch_engine=pitch_engine)
@@ -177,15 +246,15 @@ def main():
             # Fast analysis logic
             if file_unplugged is not None:
                 with st.spinner("Processing 'Unplugged' Intonation..."):
-                    y, sr, f0, voiced_flag, rms = st.session_state['extracted_unp']
-                    res_unp = analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold, min_frames, max_pitch_slope, toggles)
+                    y, sr, f0, voiced_flag, rms, voicing_prob = st.session_state['extracted_unp']
+                    res_unp = analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold, min_frames, max_pitch_slope, toggles, voicing_prob, confidence_threshold, reference_pitch_hz)
                     res_unp.update(analyze_amplitude(y, sr))
                     st.session_state['analysis_results_unplugged'] = res_unp
 
             if file_plugged is not None:
                 with st.spinner("Processing 'Plugged' Intonation..."):
-                    y, sr, f0, voiced_flag, rms = st.session_state['extracted_plg']
-                    res_plg = analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold, min_frames, max_pitch_slope, toggles)
+                    y, sr, f0, voiced_flag, rms, voicing_prob = st.session_state['extracted_plg']
+                    res_plg = analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold, min_frames, max_pitch_slope, toggles, voicing_prob, confidence_threshold, reference_pitch_hz)
                     res_plg.update(analyze_amplitude(y, sr))
                     st.session_state['analysis_results_plugged'] = res_plg
 
@@ -241,7 +310,7 @@ def main():
                         )
                         st.plotly_chart(fig_unp_dtw, use_container_width=True)
                         
-                        dtw_metrics_unp = calculate_dtw_metrics(midi_timing, time_array_unp, folded_f0_hz_unp, res_unp['rms'], res_unp['final_mask'], warped_unp, correction_array_unp)
+                        dtw_metrics_unp = calculate_dtw_metrics(midi_timing, time_array_unp, folded_f0_hz_unp, res_unp['rms'], res_unp['final_mask'], warped_unp, correction_array_unp, res_unp.get('voicing_prob'), reference_pitch_hz)
                     
                     if plg_ok:
                         st.write("**Plugged Alignment:**")
@@ -255,10 +324,37 @@ def main():
                         )
                         st.plotly_chart(fig_plg_dtw, use_container_width=True)
                         
-                        dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg, correction_array_plg)
+                        dtw_metrics_plg = calculate_dtw_metrics(midi_timing, time_array_plg, folded_f0_hz_plg, res_plg['rms'], res_plg['final_mask'], warped_plg, correction_array_plg, res_plg.get('voicing_prob'), reference_pitch_hz)
                         
                     excluded_indices = render_dtw_results_table(dtw_metrics_unp, dtw_metrics_plg)
-                    render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices)
+                    render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices,
+                                             pitch_engine=pitch_engine)
+
+                    # Distribution + Bland-Altman diagnostics for the shape statistics
+                    # reported in the summary table above.
+                    from src.midi_alignment import included_note_deviations, pair_note_deviations
+                    from src.visualization import render_distribution_diagnostics
+
+                    series = {}
+                    if dtw_metrics_unp:
+                        series["Unplugged"] = included_note_deviations(dtw_metrics_unp, excluded_indices)
+                    if dtw_metrics_plg:
+                        series["Plugged"] = included_note_deviations(dtw_metrics_plg, excluded_indices)
+
+                    paired = None
+                    if dtw_metrics_unp and dtw_metrics_plg:
+                        dev_unp, dev_plg, note_labels = pair_note_deviations(
+                            dtw_metrics_unp, dtw_metrics_plg, excluded_indices
+                        )
+                        if dev_unp.size >= 2:
+                            paired = (dev_unp, dev_plg, "Unplugged", "Plugged", note_labels)
+
+                    # DTW deviations are per-note medians of frame values, so they
+                    # sit on a 5-cent lattice rather than the raw 10-cent frame grid.
+                    from src.stats_summary import PYIN_NOTE_MEDIAN_RESOLUTION_CENTS
+                    render_distribution_diagnostics(series, paired=paired, unit="cents",
+                                                    key_prefix="dtw",
+                                                    bin_width=PYIN_NOTE_MEDIAN_RESOLUTION_CENTS)
                 else:
                     st.info("Upload a MIDI reference to view DTW Alignment Diagnostics.")
 
@@ -271,7 +367,23 @@ def main():
                 
                 # Legacy Tables
                 render_results_table(res_unp, res_plg, unp_ok, plg_ok)
-                
+
+                # Distribution diagnostics. No Bland-Altman here: legacy mode
+                # produces an unordered list of frame deviations per condition with
+                # no note-level correspondence between them, so the two conditions
+                # cannot be paired and a Bland-Altman plot would be meaningless.
+                from src.visualization import render_distribution_diagnostics
+                import numpy as _np
+
+                legacy_series = {}
+                if unp_ok:
+                    legacy_series["Unplugged"] = _np.asarray(res_unp['deviation_cents_list'], dtype=float)
+                if plg_ok:
+                    legacy_series["Plugged"] = _np.asarray(res_plg['deviation_cents_list'], dtype=float)
+                from src.stats_summary import PYIN_RESOLUTION_CENTS
+                render_distribution_diagnostics(legacy_series, unit="cents", key_prefix="legacy",
+                                                bin_width=PYIN_RESOLUTION_CENTS)
+
                 # Pitch Tracks
                 render_pitch_track_visualizations(unp_ok, plg_ok, res_unp, res_plg)
 

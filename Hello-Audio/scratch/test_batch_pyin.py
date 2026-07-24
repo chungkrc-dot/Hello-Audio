@@ -18,7 +18,7 @@ def process_instrument(audio_path, midi_path, target_track, inst):
     
     with open(audio_path, 'rb') as f:
         # Use pYIN this time
-        y, sr, f0_hz, voiced_flag, rms = extract_pitch_and_rms(
+        y, sr, f0_hz, voiced_flag, rms, _ = extract_pitch_and_rms(
             f, inst, 0.005, enable_freq_limits=True, pitch_engine='pYIN'
         )
     

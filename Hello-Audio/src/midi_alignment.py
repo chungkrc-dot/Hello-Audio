@@ -7,6 +7,160 @@ pitch boundaries, and extracting precise intonation metrics bound strictly to th
 """
 import numpy as np
 
+from src.stats_summary import prefixed_stats
+
+def included_note_deviations(metrics, excluded_indices=None, key="Deviation_Cents"):
+    """
+    Pulls the per-note deviation values that contribute to the summary: notes that
+    were detected at all, minus any the caller excluded (the UI's Include column,
+    which is seeded by is_note_excluded()).
+
+    Returned as a plain float array so it can be fed straight to the statistics
+    and plotting helpers.
+    """
+    if not metrics:
+        return np.array([])
+
+    excluded = set(excluded_indices or [])
+    vals = [m.get(key, np.nan) for m in metrics if m.get("Note_Index") not in excluded]
+    arr = np.asarray(vals, dtype=float)
+    return arr[~np.isnan(arr)]
+
+
+def pair_note_deviations(metrics_a, metrics_b, excluded_indices=None, key="Deviation_Cents"):
+    """
+    Pairs two DTW metric lists note-for-note by Note_Index, keeping only notes both
+    sides detected and neither side excluded. Returns (values_a, values_b, labels).
+
+    This is the input a Bland-Altman analysis requires: two measurements of the
+    *same* note, so the difference between them is attributable to the conditions
+    (or engines) being compared rather than to which notes each happened to catch.
+    """
+    if not metrics_a or not metrics_b:
+        return np.array([]), np.array([]), []
+
+    excluded = set(excluded_indices or [])
+    by_idx_a = {m["Note_Index"]: m for m in metrics_a}
+    by_idx_b = {m["Note_Index"]: m for m in metrics_b}
+
+    values_a, values_b, labels = [], [], []
+    for idx in sorted(set(by_idx_a) & set(by_idx_b)):
+        if idx in excluded:
+            continue
+        va = by_idx_a[idx].get(key, np.nan)
+        vb = by_idx_b[idx].get(key, np.nan)
+        if np.isnan(va) or np.isnan(vb):
+            continue
+        values_a.append(va)
+        values_b.append(vb)
+        labels.append(f"Note {idx} ({by_idx_a[idx].get('Expected_Note', '?')})")
+
+    return np.asarray(values_a, dtype=float), np.asarray(values_b, dtype=float), labels
+
+
+# Detection-yield floors below which a run is flagged for the user to check that
+# the MIDI part, the audio file and the instrument setting really correspond.
+#
+# The thresholds are engine-specific because the two engines have different
+# floors on legitimate material. Across the 41-stem URMP corpus the worst
+# genuine pYIN detection yield is 70.6%, leaving 50% clear by 20 pp with no
+# false positives. REAPER runs lower by architecture — epoch dropout in the
+# upper register (§3B) takes one genuine track to 46.8% — so a shared 50% floor
+# would fire on known-good audio and train the warning into background noise.
+LOW_DETECTION_YIELD_THRESHOLDS = {"pYIN": 50.0, "REAPER": 40.0}
+DEFAULT_LOW_DETECTION_YIELD = 50.0
+
+
+def low_detection_yield_warning(pct_detected, pitch_engine=None, threshold=None):
+    """
+    Return a warning string if detection yield is low enough to suggest the
+    audio and the MIDI part may not correspond, else None.
+
+    This is advisory. A low yield has innocent causes — difficult repertoire,
+    a quiet or noisy recording, an aggressive amplitude gate — so the message
+    asks the user to verify rather than asserting a mistake. Its real purpose
+    is to catch the one error class no range check can see: a part swap between
+    two instruments of the same type (Violin I for Violin II), which collapses
+    yield because the two parts play different notes.
+    """
+    if pct_detected is None or np.isnan(pct_detected):
+        return None
+    if threshold is None:
+        threshold = LOW_DETECTION_YIELD_THRESHOLDS.get(
+            pitch_engine, DEFAULT_LOW_DETECTION_YIELD
+        )
+    if pct_detected >= threshold:
+        return None
+    return (
+        f"Only {pct_detected:.1f}% of the MIDI notes were detected in the audio "
+        f"(below the {threshold:.0f}% guidance level for {pitch_engine or 'this engine'}). "
+        "This is often just difficult or quiet material, but it is also what a "
+        "mismatch looks like. Worth confirming that the selected MIDI track is the "
+        "part actually played in this recording — parts for the same instrument "
+        "(Violin I vs Violin II) sit in the same range and cannot be told apart by "
+        "pitch alone — and that the audio file and instrument setting are the ones "
+        "you intended."
+    )
+
+
+def summarize_dtw_metrics(metrics, excluded_indices=None):
+    """
+    Aggregates the note-by-note DTW metrics into one overall performance summary.
+
+    Reports detection and inclusion yields, mean loudness, and a full
+    distributional summary of the deviation in both cents and Hz — median, IQR,
+    skewness and kurtosis as well as mean and SD, because cent-deviation
+    distributions across a real performance are typically heavy-tailed and
+    asymmetric, and a mean alone misrepresents them.
+
+    Keys are flat: 'dev_cents_median', 'dev_hz_iqr', and so on (see
+    src/stats_summary.STAT_KEYS).
+    """
+    summary = {
+        "total_expected": 0,
+        "detected_count": 0,
+        "included_count": 0,
+        "pct_detected": np.nan,
+        "pct_included": np.nan,
+        "mean_rms_dbfs": np.nan,
+        "mean_rms_dba": np.nan,
+    }
+    summary.update(prefixed_stats([], 'dev_cents'))
+    summary.update(prefixed_stats([], 'dev_hz'))
+
+    if not metrics:
+        return summary
+
+    excluded = set(excluded_indices or [])
+
+    total_expected = len(metrics)
+    detected_count = sum(1 for m in metrics if not np.isnan(m.get("Deviation_Cents", np.nan)))
+
+    filtered = [m for m in metrics if m.get("Note_Index") not in excluded]
+    included_count = sum(1 for m in filtered if not np.isnan(m.get("Deviation_Cents", np.nan)))
+
+    summary["total_expected"] = total_expected
+    summary["detected_count"] = detected_count
+    summary["included_count"] = included_count
+    summary["pct_detected"] = (detected_count / total_expected * 100) if total_expected > 0 else np.nan
+    summary["pct_included"] = (included_count / detected_count * 100) if detected_count > 0 else np.nan
+
+    if not filtered:
+        return summary
+
+    dbfs = np.asarray([m.get("Median_RMS_dBFS", np.nan) for m in filtered], dtype=float)
+    dba = np.asarray([m.get("Median_RMS_dBA", np.nan) for m in filtered], dtype=float)
+    summary["mean_rms_dbfs"] = float(np.nanmean(dbfs)) if np.any(~np.isnan(dbfs)) else np.nan
+    summary["mean_rms_dba"] = float(np.nanmean(dba)) if np.any(~np.isnan(dba)) else np.nan
+
+    summary.update(prefixed_stats(
+        included_note_deviations(metrics, excluded, "Deviation_Cents"), 'dev_cents'))
+    summary.update(prefixed_stats(
+        included_note_deviations(metrics, excluded, "Deviation_Hz"), 'dev_hz'))
+
+    return summary
+
+
 def is_note_excluded(note_dict):
     """
     Centralized logic for determining if a note should be excluded from summary metrics.
@@ -87,32 +241,44 @@ def compute_dtw_path(midi_chroma, audio_chroma, force_global=False):
     Computes the Dynamic Time Warping (DTW) path between MIDI and Audio Chroma.
     Automatically handles sequence length swapping to satisfy librosa's subseq requirements,
     unless force_global=True which forces a global alignment.
+
+    Uses Müller's Sigma_2 step pattern {(1,1),(2,1),(1,2)} with weights (2,1,1)
+    to prevent degenerate warping paths.
     """
     import numpy as np
     import librosa
-    
-    # Subsequence DTW requires the shorter query sequence to be the first argument (X) 
+
+    # Müller (2015) Sigma_2: eliminates pure horizontal/vertical steps,
+    # constraining the warping path slope to [1/2, 2].
+    step_sizes_sigma = np.array([[1, 1], [2, 1], [1, 2]], dtype=np.uint32)
+    weights_mul = np.array([2.0, 1.0, 1.0], dtype=np.float64)
+
+    # Subsequence DTW requires the shorter query sequence to be the first argument (X)
     # and the longer reference sequence to be the second argument (Y).
     # We dynamically swap them so the algorithm is mathematically robust to any tempo.
-    
+
     len_midi = midi_chroma.shape[1]
     len_audio = audio_chroma.shape[1]
-    
+
     if force_global:
         # Force global alignment, anchoring the start and end of both sequences.
         D, wp = librosa.sequence.dtw(
-            midi_chroma, 
-            audio_chroma, 
-            metric='cosine', 
+            midi_chroma,
+            audio_chroma,
+            metric='cosine',
+            step_sizes_sigma=step_sizes_sigma,
+            weights_mul=weights_mul,
             subseq=False
         )
         wp = np.fliplr(wp)
     elif len_midi <= len_audio:
         # MIDI is shorter (student played slow). Normal configuration.
         D, wp = librosa.sequence.dtw(
-            midi_chroma, 
-            audio_chroma, 
-            metric='cosine', 
+            midi_chroma,
+            audio_chroma,
+            metric='cosine',
+            step_sizes_sigma=step_sizes_sigma,
+            weights_mul=weights_mul,
             subseq=True
         )
         # wp has shape (N, 2), where column 0 = MIDI, column 1 = Audio.
@@ -121,15 +287,17 @@ def compute_dtw_path(midi_chroma, audio_chroma, force_global=False):
     else:
         # Audio is shorter (student played fast). Swapped configuration.
         D, wp = librosa.sequence.dtw(
-            audio_chroma, 
-            midi_chroma, 
-            metric='cosine', 
+            audio_chroma,
+            midi_chroma,
+            metric='cosine',
+            step_sizes_sigma=step_sizes_sigma,
+            weights_mul=weights_mul,
             subseq=True
         )
         # wp has shape (N, 2), where column 0 = Audio, column 1 = MIDI.
         # This is already the downstream expected format (Audio, MIDI), so no flip is needed!
         pass
-    
+
     return wp
 
 
@@ -253,7 +421,7 @@ def apply_harmonic_folding(f0_hz, expected_midi_pitch):
     
     return folded_f0_hz, f0_midi_oct, correction_array
 
-def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline, correction_array=None):
+def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_midi_timeline, correction_array=None, voicing_prob=None, reference_pitch_hz=440.0):
     """
     Extracts the final intonation and amplitude metrics for every note in the sequence.
     It isolates the exact temporal island of the note using the DTW warped timeline, 
@@ -286,12 +454,14 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
             # Median f0 inside this strict, folded island
             median_f0 = np.nanmedian(note_f0)
             median_midi = librosa.hz_to_midi(median_f0)
-            
+            tuning_offset = 1200 * np.log2(reference_pitch_hz / 440.0) / 100.0
+            median_midi_corrected = median_midi - tuning_offset
+
             # Deviation from the TRUE MIDI pitch (cents)
-            deviation_cents = (median_midi - pitch) * 100
+            deviation_cents = (median_midi_corrected - pitch) * 100
             
-            # Convert deviation to Hz
-            expected_hz = librosa.midi_to_hz(pitch)
+            # Convert deviation to Hz — shift expected frequency by tuning ratio
+            expected_hz = librosa.midi_to_hz(pitch) * (reference_pitch_hz / 440.0)
             deviation_hz = median_f0 - expected_hz
             
             # RMS in dBFS
@@ -313,6 +483,8 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
                     correction_type = Counter(actual_corrections).most_common(1)[0][0]
                     correction_applied = True
             
+            median_confidence = np.nanmedian(voicing_prob[strict_note_mask]) if voicing_prob is not None else np.nan
+
             dtw_results.append({
                 'Note_Index': i + 1,
                 'Expected_Note': note_name,
@@ -322,6 +494,7 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
                 'Deviation_Hz': deviation_hz,
                 'Median_RMS_dBFS': median_rms_dbfs,
                 'Median_RMS_dBA': median_rms_dba,
+                'Median_Confidence': median_confidence,
                 'Correction_Applied': correction_applied,
                 'Correction_Type': correction_type
             })
@@ -331,11 +504,12 @@ def calculate_dtw_metrics(midi_notes, time_array, f0, rms, final_mask, warped_mi
                 'Note_Index': i + 1,
                 'Expected_Note': note_name,
                 'Median_Detected_Pitch_Hz': np.nan,
-                'Expected_Target_Pitch_Hz': librosa.midi_to_hz(pitch) if not np.isnan(pitch) else np.nan,
+                'Expected_Target_Pitch_Hz': librosa.midi_to_hz(pitch) * (reference_pitch_hz / 440.0) if not np.isnan(pitch) else np.nan,
                 'Deviation_Cents': np.nan,
                 'Deviation_Hz': np.nan,
                 'Median_RMS_dBFS': np.nan,
                 'Median_RMS_dBA': np.nan,
+                'Median_Confidence': np.nan,
                 'Correction_Applied': False,
                 'Correction_Type': "None"
             })

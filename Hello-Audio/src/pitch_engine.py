@@ -1,6 +1,8 @@
 import librosa
 import numpy as np
 
+from src.stats_summary import prefixed_stats
+
 def get_instrument_fmin_fmax(instrument: str):
     """
     Returns the appropriate (fmin, fmax) frequency limits in Hz 
@@ -22,6 +24,10 @@ def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limit
     """
     Loads audio, extracts pitch using the selected engine (pYIN or REAPER), and calculates RMS energy.
     Ensures all arrays are exactly the same length.
+
+    Returns: (y, sr, f0, voiced_flag, rms, voicing_probability)
+    For REAPER, voicing_probability is 1.0 for voiced frames and 0.0 for unvoiced,
+    since REAPER only provides a binary voiced/unvoiced flag.
     """
     audio_file.seek(0)
     
@@ -45,19 +51,22 @@ def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limit
         pm_times, pm, f0_times, f0, corr = pyreaper.reaper(y_int16, sr, minf0=max(40.0, fmin_hz), maxf0=min(2000.0, fmax_hz), frame_period=frame_period)
         
         f0[f0 == -1.0] = np.nan
-        
+
         # Restore to full 44.1kHz equivalent timeline for identical masking mathematically
         target_sr = 44100
         hop_length = 512
         audio_file.seek(0)
         y_orig, _ = librosa.load(audio_file, sr=target_sr, duration=duration)
-        
+
         expected_frames = int(np.ceil(len(y_orig) / hop_length))
         time_standard = librosa.times_like(np.zeros(expected_frames), sr=target_sr, hop_length=hop_length)
-        
+
         f0_standard = np.interp(time_standard, f0_times, f0, left=np.nan, right=np.nan)
         voiced_flag = ~np.isnan(f0_standard)
-        
+
+        # REAPER provides binary voicing only — synthesize probability as 1.0/0.0
+        voicing_prob = np.where(voiced_flag, 1.0, 0.0)
+
         # Use the original high-res audio for RMS
         rms = librosa.feature.rms(y=y_orig, frame_length=2048, hop_length=512)[0]
         y_return = y_orig
@@ -66,10 +75,10 @@ def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limit
     else:
         # pYIN Path
         y, sr = librosa.load(audio_file, sr=None, duration=duration)
-        f0_return, voiced_flag, _ = librosa.pyin(
-            y, 
-            fmin=fmin_hz, 
-            fmax=fmax_hz, 
+        f0_return, voiced_flag, voicing_prob = librosa.pyin(
+            y,
+            fmin=fmin_hz,
+            fmax=fmax_hz,
             sr=sr,
             switch_prob=switch_prob
         )
@@ -78,17 +87,18 @@ def extract_pitch_and_rms(audio_file, instrument, switch_prob, enable_freq_limit
         sr_return = sr
         
     # Ensure all arrays are exactly the same length before logical operations
-    min_len = min(len(voiced_flag), len(rms))
+    min_len = min(len(voiced_flag), len(rms), len(voicing_prob))
     f0_return = f0_return[:min_len]
     voiced_flag = voiced_flag[:min_len]
     rms = rms[:min_len]
-    
-    return y_return, sr_return, f0_return, voiced_flag, rms
+    voicing_prob = voicing_prob[:min_len]
 
-def generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope, enable_slope_filter=True):
+    return y_return, sr_return, f0_return, voiced_flag, rms, voicing_prob
+
+def generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope, enable_slope_filter=True, voicing_prob=None, confidence_threshold=0.0):
     """
-    Calculates the combined boolean mask for voiced frames, amplitude threshold, 
-    and pitch stability (slope).
+    Calculates the combined boolean mask for voiced frames, amplitude threshold,
+    pitch stability (slope), and voicing confidence.
     """
     # --- Pitch Rate-of-Change (Derivative) Filter ---
     # Convert f0 to continuous MIDI, explicitly ignoring NaNs (unvoiced frames)
@@ -105,8 +115,14 @@ def generate_filters(f0, voiced_flag, rms, rms_threshold, max_pitch_slope, enabl
     else:
         slope_mask = np.ones_like(pitch_slope, dtype=bool)
 
-    # Combine all condition masks: Must be voiced AND loud enough AND vertically stable
-    combined_mask = voiced_flag & (rms > rms_threshold) & slope_mask
+    # Voicing confidence mask
+    if voicing_prob is not None and confidence_threshold > 0.0:
+        confidence_mask = voicing_prob >= confidence_threshold
+    else:
+        confidence_mask = np.ones_like(voiced_flag, dtype=bool)
+
+    # Combine all condition masks: Must be voiced AND loud enough AND vertically stable AND confident
+    combined_mask = voiced_flag & (rms > rms_threshold) & slope_mask & confidence_mask
     return combined_mask
 
 def apply_duration_filter(combined_mask, min_frames, enable_duration_filter=True):
@@ -130,7 +146,7 @@ def apply_duration_filter(combined_mask, min_frames, enable_duration_filter=True
             
     return final_mask
 
-def calculate_island_metrics(f0, final_mask, enable_locked_target=True):
+def calculate_island_metrics(f0, final_mask, enable_locked_target=True, reference_pitch_hz=440.0):
     """
     Identifies the final isolated note islands after duration filtering,
     applies the Locked Target Rule (median MIDI value), and computes deviations.
@@ -154,7 +170,13 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True):
         
         if len(valid_island_f0) > 0:
             continuous_midi = librosa.hz_to_midi(valid_island_f0)
-            
+            tuning_offset = 1200 * np.log2(reference_pitch_hz / 440.0) / 100.0
+            continuous_midi = continuous_midi - tuning_offset
+
+            # Scale librosa's A=440-based target frequencies into the selected
+            # reference so the plotted target line and Hz deviations track tuning.
+            tuning_ratio = reference_pitch_hz / 440.0
+
             if enable_locked_target:
                 # --- Locked Target Rule ---
                 island_median_midi = np.median(continuous_midi)
@@ -164,8 +186,8 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True):
                 detected_notes_sequence.append(note_name)
                 
                 island_deviation = (continuous_midi - locked_target_note) * 100
-                
-                target_hz = librosa.midi_to_hz(locked_target_note)
+
+                target_hz = librosa.midi_to_hz(locked_target_note) * tuning_ratio
                 island_deviation_hz = valid_island_f0 - target_hz
                 
                 # For f0_target
@@ -179,7 +201,7 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True):
                 detected_notes_sequence.append(note_name)
                 
                 island_deviation = (continuous_midi - target_note_array) * 100
-                target_hz_array = librosa.midi_to_hz(target_note_array)
+                target_hz_array = librosa.midi_to_hz(target_note_array) * tuning_ratio
                 island_deviation_hz = valid_island_f0 - target_hz_array
                 
             deviation_cents_list.extend(island_deviation)
@@ -200,7 +222,7 @@ def calculate_island_metrics(f0, final_mask, enable_locked_target=True):
         'full_deviation': full_deviation
     }
 
-def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_frames=10, max_pitch_slope=3.0, toggles=None):
+def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_frames=10, max_pitch_slope=3.0, toggles=None, voicing_prob=None, confidence_threshold=0.0, reference_pitch_hz=440.0):
     """
     Core engine for intonation analysis.
     Accepts pre-extracted pYIN pitch arrays and orchestrates masking, filtering, and metric calculation.
@@ -227,11 +249,11 @@ def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_fram
         effective_rms_threshold = rms_threshold
 
     # 2. Filtering
-    combined_mask = generate_filters(f0, voiced_flag, rms, effective_rms_threshold, max_pitch_slope, enable_slope_filter)
+    combined_mask = generate_filters(f0, voiced_flag, rms, effective_rms_threshold, max_pitch_slope, enable_slope_filter, voicing_prob, confidence_threshold)
     final_mask = apply_duration_filter(combined_mask, min_frames, enable_duration_filter)
     
     # 3. Metrics Calculation
-    metrics = calculate_island_metrics(f0, final_mask, enable_locked_target)
+    metrics = calculate_island_metrics(f0, final_mask, enable_locked_target, reference_pitch_hz)
     
     # 4. Compilation
     results = {
@@ -239,6 +261,7 @@ def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_fram
         'f0': f0,
         'sr': sr,
         'rms': rms,
+        'voicing_prob': voicing_prob,
         'final_mask': final_mask,
         'f0_target': metrics['f0_target'],
         'full_deviation': metrics['full_deviation'],
@@ -251,11 +274,23 @@ def analyze_intonation(y, sr, f0, voiced_flag, rms, rms_threshold=0.01, min_fram
     if results['success']:
         deviation_cents = np.array(metrics['deviation_cents_list'])
         deviation_hz = np.array(metrics['deviation_hz_list'])
-        results['mean_dev'] = np.mean(deviation_cents)
-        results['std_dev'] = np.std(deviation_cents)
-        results['mean_dev_hz'] = np.mean(deviation_hz)
-        results['std_dev_hz'] = np.std(deviation_hz)
+
+        # Full distributional summary (median/IQR/skewness/kurtosis alongside the
+        # classical mean/SD) for both units. Frame-level deviations from pYIN sit
+        # on a 10-cent lattice — see src/stats_summary for what that costs the
+        # order statistics.
+        results.update(prefixed_stats(deviation_cents, 'dev_cents'))
+        results.update(prefixed_stats(deviation_hz, 'dev_hz'))
+
+        # Legacy aliases retained for existing callers and the results table.
+        # These now use the sample SD (ddof=1) rather than the population SD;
+        # at the frame counts involved the difference is far below display precision.
+        results['mean_dev'] = results['dev_cents_mean']
+        results['std_dev'] = results['dev_cents_std']
+        results['mean_dev_hz'] = results['dev_hz_mean']
+        results['std_dev_hz'] = results['dev_hz_std']
+
         results['frame_count'] = len(deviation_cents)
         results['note_count'] = len(metrics['starts'])
-        
+
     return results

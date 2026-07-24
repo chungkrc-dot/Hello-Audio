@@ -43,7 +43,7 @@ def test_reaper_folding():
             continue
             
         with open(audio_path, 'rb') as f:
-            y, sr, f0_hz, voiced_flag, rms = pitch_engine.extract_pitch_and_rms(
+            y, sr, f0_hz, voiced_flag, rms, _ = pitch_engine.extract_pitch_and_rms(
                 f,
                 inst,
                 0.005,
