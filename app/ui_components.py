@@ -12,6 +12,7 @@ import pandas as pd
 from itertools import zip_longest
 from src.midi_alignment import (
     is_note_excluded, summarize_dtw_metrics, low_detection_yield_warning,
+    paired_delta_summary, paired_coverage_advisory,
 )
 from src.stats_summary import PYIN_RESOLUTION_CENTS, TRIM_PROPORTION
 
@@ -550,14 +551,31 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
 
     summary_data.append(unp_means)
     summary_data.append(plg_means)
-    
-    delta = {"Condition": "Delta (Unplugged - Plugged)"}
+
+    # Two deltas, and the order is deliberate. The PAIRED delta compares the two
+    # conditions note-for-note over the notes both detected, so the difference is
+    # the condition effect rather than a byproduct of which notes each side caught
+    # — it is the figure to report. The INDEPENDENT-MEANS delta subtracts each
+    # condition's own mean over its own note set; it is kept for transparency and
+    # to expose drift (the two agree only when the takes detect the same notes).
+    have_both = bool(dtw_metrics_unp) and bool(dtw_metrics_plg)
+    pd_summary = paired_delta_summary(dtw_metrics_unp, dtw_metrics_plg, excluded_indices) if have_both else None
+
+    if have_both:
+        paired_row = {"Condition": "Delta (paired, drift-free)"}
+        for key in unp_means:
+            if key == "Condition":
+                continue
+            paired_row[key] = pd_summary["deltas"].get(key, np.nan)  # N/A for non-mean columns
+        summary_data.append(paired_row)
+
+    delta = {"Condition": "Delta (independent means)"}
     for key in unp_means:
         if key == "Condition":
             continue
         delta[key] = unp_means[key] - plg_means[key]
     summary_data.append(delta)
-    
+
     df_summary = pd.DataFrame(summary_data)
     df_summary.set_index("Condition", inplace=True)
     
@@ -573,7 +591,16 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
     )
     
     st.caption("**Notes Detected (%)**: The percentage of expected MIDI notes that were successfully extracted by the pitch tracking algorithm.\n\n"
-               "**Notes Included (%)**: The percentage of *detected notes* that successfully passed all algorithmic tracking filters (and manual exclusions) to contribute to the mean deviation calculations above.")
+               "**Notes Included (%)**: The percentage of *detected notes* that successfully passed all algorithmic tracking filters (and manual exclusions) to contribute to the mean deviation calculations above.\n\n"
+               "**Delta (paired, drift-free)**: the condition effect measured note-for-note over the notes *both* takes detected — the figure to report. **Delta (independent means)**: each condition's own mean subtracted; shown for transparency, it matches the paired figure only when the two takes detect the same notes.")
+
+    # Pairing-coverage line: how much of the score the paired Delta rests on.
+    if pd_summary is not None:
+        st.caption(
+            f"Paired Delta computed over **{pd_summary['n_paired']} notes** both takes "
+            f"detected (Unplugged detected {unp_summary['pct_detected']:.0f}%, "
+            f"Plugged {plg_summary['pct_detected']:.0f}%)."
+        )
 
     # Advisory: a very low detection yield is the only signal that catches a
     # same-instrument part swap, which the tessitura check cannot see.
@@ -581,6 +608,16 @@ def render_dtw_summary_table(dtw_metrics_unp, dtw_metrics_plg, excluded_indices=
         msg = low_detection_yield_warning(summary["pct_detected"], pitch_engine)
         if msg:
             st.warning(f"**{label}:** {msg}")
+
+    # Advisory: when the two takes' yields diverge, the independent-means delta
+    # drifts and the paired delta should be trusted instead.
+    if pd_summary is not None:
+        adv = paired_coverage_advisory(
+            unp_summary["pct_detected"], plg_summary["pct_detected"],
+            pd_summary["n_paired"], pd_summary["n_detected_a"], pd_summary["n_detected_b"],
+        )
+        if adv:
+            st.warning(adv)
 
     # --- Distributional summary ---
     st.write("**Deviation Distribution Statistics (DTW)**")

@@ -103,6 +103,104 @@ def low_detection_yield_warning(pct_detected, pitch_engine=None, threshold=None)
     )
 
 
+# The four "effect" metrics whose condition-to-condition difference is a research
+# output. Each maps a summary-table column to the per-note key it is paired on.
+PAIRED_DELTA_KEYS = {
+    "mean intonation deviation (Hz)": "Deviation_Hz",
+    "mean intonation deviation (cents)": "Deviation_Cents",
+    "mean RMS amplitude (dB FS)": "Median_RMS_dBFS",
+    "mean RMS amplitude (dB A)": "Median_RMS_dBA",
+}
+
+# Below this note-level detection overlap, or beyond this yield gap, the
+# independent-means delta is at risk of drift and the paired delta should be
+# trusted instead. Advisory thresholds, not hard cutoffs.
+PAIRED_COVERAGE_MIN_FRACTION = 0.70   # paired notes / smaller side's detected count
+PAIRED_YIELD_GAP_PP = 10.0            # |detected%_a - detected%_b|
+
+
+def paired_delta_summary(metrics_a, metrics_b, excluded_indices=None):
+    """
+    Drift-free delta between two conditions (a - b), computed **note-for-note over
+    the notes both conditions detected and neither excluded** — the same pairing
+    the Bland-Altman analysis uses.
+
+    The summary table's other delta subtracts each condition's *independent* mean,
+    each taken over that condition's own detected notes. When the two conditions
+    detect different note sets (asymmetric yield — the norm once a real difference
+    is present), that difference of independent means carries arithmetic drift
+    from the non-overlapping notes: it mixes the true condition effect with the
+    accident of which notes each side caught. Comparing each note to itself across
+    the two conditions removes that drift and, because it cancels the large
+    note-to-note variation in difficulty, also estimates the effect far more
+    precisely. This is the standard paired / within-subject comparison.
+
+    Returns a dict:
+      deltas          {column_label: mean paired difference (a - b)}  (np.nan if none)
+      n_paired        number of notes contributing (both detected, not excluded)
+      n_detected_a/b  each condition's detected-note count
+      total           expected note count
+    """
+    excl = set(excluded_indices or [])
+    by_a = {m["Note_Index"]: m for m in (metrics_a or [])}
+    by_b = {m["Note_Index"]: m for m in (metrics_b or [])}
+
+    def detected(by):
+        return sum(1 for m in by.values()
+                   if not np.isnan(m.get("Deviation_Cents", np.nan)))
+
+    shared = [
+        i for i in sorted(set(by_a) & set(by_b))
+        if i not in excl
+        and not np.isnan(by_a[i].get("Deviation_Cents", np.nan))
+        and not np.isnan(by_b[i].get("Deviation_Cents", np.nan))
+    ]
+
+    deltas = {}
+    for col, key in PAIRED_DELTA_KEYS.items():
+        diffs = [
+            by_a[i].get(key, np.nan) - by_b[i].get(key, np.nan)
+            for i in shared
+        ]
+        diffs = [d for d in diffs if not np.isnan(d)]
+        deltas[col] = float(np.mean(diffs)) if diffs else np.nan
+
+    total = max((m.get("Note_Index", 0) for m in list(by_a.values()) + list(by_b.values())),
+                default=0)
+    return {
+        "deltas": deltas,
+        "n_paired": len(shared),
+        "n_detected_a": detected(by_a),
+        "n_detected_b": detected(by_b),
+        "total": len(by_a) or len(by_b),
+    }
+
+
+def paired_coverage_advisory(pct_detected_a, pct_detected_b, n_paired,
+                             n_detected_a, n_detected_b):
+    """
+    Return an advisory string when the two conditions' detected note sets diverge
+    enough that the independent-means delta is unreliable and the paired delta
+    should be preferred, else None. Fires on a large yield gap or a small paired
+    overlap relative to the smaller condition.
+    """
+    smaller = min(n_detected_a, n_detected_b)
+    if smaller <= 0:
+        return None
+    coverage = n_paired / smaller
+    gap = abs((pct_detected_a or 0.0) - (pct_detected_b or 0.0))
+    if gap < PAIRED_YIELD_GAP_PP and coverage >= PAIRED_COVERAGE_MIN_FRACTION:
+        return None
+    return (
+        f"The two takes detected different notes (yields {pct_detected_a:.0f}% vs "
+        f"{pct_detected_b:.0f}%; {n_paired} notes in common). The **paired** Delta "
+        "compares only those shared notes and is the trustworthy effect here; the "
+        "independent-means Delta mixes in notes only one take caught and can drift. "
+        "Report the paired figure, and treat a large yield gap as a data-quality "
+        "signal worth checking."
+    )
+
+
 def summarize_dtw_metrics(metrics, excluded_indices=None):
     """
     Aggregates the note-by-note DTW metrics into one overall performance summary.

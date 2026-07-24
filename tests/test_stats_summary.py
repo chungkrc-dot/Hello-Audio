@@ -315,6 +315,57 @@ def test_pairing_keeps_only_mutually_detected_notes():
     print(f"Pairing kept {va.size} of 4 notes: {labels}")
 
 
+def test_paired_delta_removes_drift_the_independent_means_delta_shows():
+    """
+    The headline case for the paired delta. True effect is zero: both conditions
+    play notes 1-6 identically. But the "plugged" take misses notes 5-6, which
+    happen to be sharp. The difference of independent means then shows a phantom
+    effect, while the paired delta over the shared notes correctly reads zero.
+    """
+    from src.midi_alignment import (paired_delta_summary, paired_coverage_advisory,
+                                     summarize_dtw_metrics)
+
+    devs = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 40.0, 6: 40.0}  # notes 5-6 sharp
+    unp = [{'Note_Index': i, 'Expected_Note': 'A4', 'Deviation_Cents': d,
+            'Deviation_Hz': d * 0.25, 'Median_RMS_dBFS': -20.0, 'Median_RMS_dBA': -19.0}
+           for i, d in devs.items()]
+    # Plugged is identical on the notes it caught, but missed 5 and 6 (NaN).
+    plg = [{'Note_Index': i, 'Expected_Note': 'A4',
+            'Deviation_Cents': (d if i <= 4 else np.nan),
+            'Deviation_Hz': (d * 0.25 if i <= 4 else np.nan),
+            'Median_RMS_dBFS': (-20.0 if i <= 4 else np.nan),
+            'Median_RMS_dBA': (-19.0 if i <= 4 else np.nan)}
+           for i, d in devs.items()]
+
+    # Independent means: unplugged averages all six (mean +13.3), plugged the
+    # four it caught (mean 0) -> a phantom +13.3 c "effect".
+    u = summarize_dtw_metrics(unp)
+    p = summarize_dtw_metrics(plg)
+    indep_delta = u['dev_cents_mean'] - p['dev_cents_mean']
+    assert indep_delta > 10.0  # the drift the naive delta invents
+
+    # Paired: only notes 1-4 are shared; every per-note difference is 0.
+    pdelta = paired_delta_summary(unp, plg)
+    assert pdelta['n_paired'] == 4
+    assert np.isclose(pdelta['deltas']['mean intonation deviation (cents)'], 0.0)
+    assert np.isclose(pdelta['deltas']['mean RMS amplitude (dB FS)'], 0.0)
+    assert np.isclose(pdelta['deltas']['mean intonation deviation (Hz)'], 0.0)
+
+    # The yield gap (100% vs 67%) must trip the advisory.
+    adv = paired_coverage_advisory(u['pct_detected'], p['pct_detected'],
+                                   pdelta['n_paired'], pdelta['n_detected_a'],
+                                   pdelta['n_detected_b'])
+    assert adv is not None and 'paired' in adv.lower()
+
+    # When both takes catch the same notes, the advisory stays silent and the two
+    # deltas coincide.
+    quiet = paired_coverage_advisory(95.0, 96.0, 40, 40, 41)
+    assert quiet is None
+
+    print(f"Paired delta {pdelta['deltas']['mean intonation deviation (cents)']:+.1f}c "
+          f"(true 0) vs independent-means {indep_delta:+.1f}c (phantom)")
+
+
 def test_note_median_lattice_constant_is_half_the_frame_lattice():
     """Guards the constant the resolution-floor argument in the manual rests on."""
     assert np.isclose(PYIN_NOTE_MEDIAN_RESOLUTION_CENTS, PYIN_RESOLUTION_CENTS / 2.0)
@@ -334,6 +385,7 @@ if __name__ == "__main__":
         test_normality_tests_discriminate,
         test_dtw_summary_reports_the_new_statistics,
         test_pairing_keeps_only_mutually_detected_notes,
+        test_paired_delta_removes_drift_the_independent_means_delta_shows,
         test_note_median_lattice_constant_is_half_the_frame_lattice,
     ]
     for t in tests:
