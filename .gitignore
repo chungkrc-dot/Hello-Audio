@@ -29,3 +29,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Cross-corpus validation audio (CC-BY-NC, not redistributed here)
+dataset (Haydn anechoic)/

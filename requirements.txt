@@ -24,3 +24,8 @@ matplotlib==3.9.4
 
 # --- Tests ---
 pytest==8.4.2
+
+# --- Validation tooling (not imported by the app) ---
+# Used only by tests/scripts/validation/validate_haydn_crosscorpus.py to parse the
+# CC0 OpenScore MusicXML of Haydn Op.76 No.1 into per-part note lists (Appendix M).
+music21==8.3.0

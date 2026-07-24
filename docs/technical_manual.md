@@ -81,6 +81,7 @@ The appendices carry the empirical evidence and are organized by what they valid
 | **J** | Distributional statistics | 41 URMP stems | Non-normality and the quantization floor |
 | **K** | Perceptual resolution | Appendix E figures | Sufficient resolution; the untested gap |
 | **L** | Short-excerpt research configuration | 41 URMP stems, 61 excerpts | Detection and pitch recovery under the study's own settings |
+| **M** | Cross-corpus generalisation | Haydn Op.76/1, 20 anechoic stems | The pipeline holds on an independent corpus (different lab) |
 
 Appendices E–J are read as a single metrological argument: E and G characterize the instrument on signals whose truth is known exactly, F and H–J characterize it on real performance material, and J determines which summary statistics the instrument's output can legitimately support.
 
@@ -812,10 +813,11 @@ The final column is the operative one and is derived in Appendix J. Order statis
 
 ### Current Validated Scope
 
-Every empirical result in this manual was produced on **violin, viola and cello** material drawn from the URMP dataset, and the application exposes exactly those three instruments in `get_instrument_fmin_fmax()`. The validated scope of the engine is therefore limited to those three instruments. In particular:
+Almost every empirical result in this manual was produced on **violin, viola and cello** material drawn from the URMP dataset; the sole exception is the cross-corpus check of Appendix M, which uses an independent anechoic Haydn quartet recording and finds the pipeline generalises. The application exposes exactly those three instruments in `get_instrument_fmin_fmax()`, so the validated scope of the engine is limited to them. In particular:
 
 * **Double bass is not supported.** No frequency bounds are defined for it, and no double-bass material appears in any validation study reported here. The URMP string corpus comprises 15 pieces and 41 stems — 23 violin, 8 viola and 10 cello (Appendix A).
-* **Sample rate.** The Engine Optimal Defaults are validated for material at 44.1 kHz and above; the URMP corpus is 48 kHz. Because $\theta_{slope}$ is specified per frame at a fixed hop of 512 samples, its effective rate limit scales with $f_s$ (§4B).
+* **A second corpus now exists, but a narrow one.** The single-dataset limitation is partially addressed by Appendix M, which reproduces the pipeline's yield on an independent recording (different lab, room, players and repertoire). That corpus is a single quartet with score-only ground truth, so it narrows the generalisation gap rather than closing it; broad multi-dataset validation with independent $f_0$ ground truth remains future work.
+* **Sample rate.** The Engine Optimal Defaults are validated for material at 44.1 kHz and above; the URMP corpus is 48 kHz and the Appendix M cross-corpus material is 44.1 kHz, so the lower bound of the validated range is now exercised directly. Because $\theta_{slope}$ is specified per frame at a fixed hop of 512 samples, its effective rate limit scales with $f_s$ (§4B).
 * **Monophonic stems only.** The pipeline assumes a single sounding voice per input file. Polyphonic or ensemble mixes are outside scope.
 * **No perceptual validation has been performed.** The engine is validated metrologically only — against synthesized tones of known frequency, against a MIDI score, against a second configuration of itself, and against the URMP corpus's independent ground-truth transcription of the performed pitch (Appendix L). Every one of those references is a measured or notated frequency; none is a listening judgement. It has never been compared to a trained listener. Its precision on string timbre ($2.65$ cents, Appendix E) is finer than the human discrimination threshold for successive complex tones, which is on the order of $5$–$10$ cents (Moore, 2012), so the measurement is not the limiting factor in any such comparison; but sufficient resolution is a necessary condition for criterion validity and not a demonstration of it. Whether the system's flat / in-tune / sharp judgements agree with those of a trained string player is untested, and no claim to that effect is made anywhere in this manual. Appendix K states the argument in full and specifies the study that would close the gap.
 ### Planned Expansion to Winds and Brass
@@ -2073,3 +2075,51 @@ Two limits bound what this validation establishes, and both make it a *conservat
 * **(b) URMP has one condition per stem.** Each URMP stem is a single performance. This validation therefore exercises and validates the **measurement pipeline** — that the research configuration detects notes and recovers performed pitch on real audio — but it says nothing about the earplug effect itself, which is a *paired* Unplugged-vs-Plugged contrast the URMP corpus cannot supply. The effect-level analysis is specified elsewhere; this appendix underwrites only the instrument that analysis depends on.
 
 The per-excerpt results are written incrementally to `tests/scripts/validation/short_excerpt_results.csv` (one row per excerpt; the harness is resumable and skips completed stems on re-launch). That path is not committed with this manual.
+
+---
+
+## Appendix M: Cross-Corpus Generalisation on an Independent String Corpus
+
+Every empirical result up to this point rests on a single dataset: URMP. That was flagged as a scope limit in §10, and Appendix I left the `rms_threshold` finding explicitly "pending validation on a second corpus." This appendix supplies that second corpus. It re-runs the research configuration on string recordings from a **different laboratory, room, instruments, players and repertoire**, and asks whether the pipeline's behaviour holds — that is, whether any of the tuning is an artefact of URMP's particular recording characteristics.
+
+### The Second Corpus
+
+The **anechoic multi-channel recordings of the Haydn String Quartet in G major, Op. 76 No. 1** (Gomes, Lachenmayr, Thilakan & Kob, *2021 Immersive and 3D Audio*, I3DA; Zenodo record 4955282, **CC-BY-NC-4.0**). Each of the four instruments (Violin I, Violin II, Viola, Cello) was recorded individually in an anechoic chamber with a multi-microphone array (16 channels, 44.1 kHz, 24-bit). The release covers five excerpts — first-movement exposition (bars 1–88), slow-movement opening (bars 1–16), the Menuetto and its Trio, and a finale passage (bars 94–138) — giving **20 monophonic stems** (5 excerpts × 4 instruments), 2,724 notated notes in total.
+
+This corpus is independent of URMP on every axis that matters for a generalisation claim: a European recording session rather than the Rochester production of URMP (Appendix A), an anechoic chamber rather than a live room, a different quartet of players, and Classical quartet writing rather than URMP's mixed arrangements. Agreement here is therefore evidence the pipeline is not fitted to URMP.
+
+### Configuration Tested
+
+Identical to Appendix L — the research configuration — so the two appendices are directly comparable: **Subsequence DTW** (`Force Global` off), **Adaptive RMS off** (static gate $\theta_{static} = 0.005$), pYIN, `switch_prob` $= 0.005$, `min_frames` $= 2$, `max_pitch_slope` $= 0.50$. The harness is `tests/scripts/validation/validate_haydn_crosscorpus.py`.
+
+### Data Preparation
+
+1. **Score ground truth (CC0).** Unlike URMP, this release ships no pitch annotations, so the reference is the **written score**: the public-domain OpenScore transcription of Op. 76 No. 1 (CC0), parsed with `music21`. Note events are taken from the *written* score — not a repeat-expanded MIDI — so the "without repetitions" Menuetto and Trio map cleanly. Each excerpt is trimmed **deterministically by the documented bar range** (or, for the Menuetto/Trio split, the movement-local measure index), never adjusted to improve any metric.
+2. **Channel extraction.** One microphone channel is taken from each 16-channel file. The recordings are anechoic and single-source, so $f_0$ is identical across channels; the choice is documented, not tuned.
+3. **Timeline normalisation.** Each excerpt's score timeline is linearly scaled so its total span equals the audio duration. The OpenScore notated tempo is arbitrary, and a gross global tempo mismatch (the Adagio is performed roughly $3\times$ slower than the notated mark) would otherwise cause Subsequence DTW to match the short score to a *sub-window* of the long take rather than stretching across it. The scaling uses **only the audio's total duration** — a single scalar, not its pitch content, onsets or amplitude — so it corrects the global alignment without touching relative note spacing or any pitch, and cannot bias the deviation measurement. It is simply the timeline a user's score MIDI would already carry if authored near the performance tempo.
+4. **Double stops.** The quartet writing contains occasional double stops (roughly 1–2% of notes); each is reduced to its top note, the pitch a monophonic tracker is expected to recover. This makes the quartet a *harder* test than URMP's single melodic lines.
+
+### Results
+
+Per-instrument means across stems, plus an overall row, under the research configuration. **Detection yield** = detected / notated notes; **inclusion yield** = passing `is_note_excluded()` / detected; **$\lvert$dev$\rvert$** is the absolute deviation of each included note from its score pitch.
+
+| Instrument | Stems | Detection Yield | Inclusion Yield | $\lvert\text{dev}\rvert$ MAE | $\lvert\text{dev}\rvert$ Median |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Violin | 10 | $96.7\%$ | $92.0\%$ | $17.8$ c | $17.8$ c |
+| Viola | 5 | $89.8\%$ | $96.4\%$ | $15.3$ c | $14.0$ c |
+| Cello | 5 | $96.0\%$ | $87.3\%$ | $15.0$ c | $12.0$ c |
+| **Overall** | **20** | **$94.8\%$** | **$91.9\%$** | **$16.4$ c** | **$15.4$ c** |
+
+Note-weighted over all 2,724 notes, detection is $96.4\%$ (2,626 detected). Against the URMP baselines under matched conditions — Appendix L's research-configuration figures of $97.9\%$ detection / $94.0\%$ inclusion, and Appendix A's Engine-Optimal-Default figures of $95.1\%$ / $87.9\%$ — the independent corpus lands **within a few points on both axes**, despite being the harder test (double stops, score-only reference, a different recording chain). The deviation magnitude ($16.4$ c mean vs URMP's $\approx 13$ c in Appendix H) is modestly higher, consistent with expressive quartet playing measured against the written score rather than a hand-verified transcription; as in Appendix J it is reported as a mean because the median is pinned to the pYIN lattice.
+
+> [!NOTE]
+> **The two low-detection stems are a known hard case, not a tracking failure.** The Trio inner voices — Viola ($61\%$) and Violin II ($80\%$) — pull the viola average down. Both are sparse repeated-note accompaniment figures beneath the first violin's running line (the Trio Viola part is 41 notes to the soloist's 172, with a third of its adjacent notes at the *same* pitch). Consecutive same-pitch notes present no pitch boundary for the onset-agnostic island logic to segment, so several notated notes collapse onto one detected island. This is the repeated-note segmentation limit — the same class of material-dependent variation seen on URMP's hardest tracks (Appendix A, Problem Track Analysis) — and it depresses *detection* while pitch tracking on the notes that are found stays accurate.
+
+### Scope and Caveats
+
+* **(a) One quartet.** This is a single work recorded in one session by one ensemble. It is a focused, pristine generalisation *point* — an independent recording chain in the same solo-bowed-string regime the engine targets — not a broad second corpus. It narrows the single-dataset gap of §10 rather than closing it; a third corpus with independent $f_0$ ground truth would narrow it further.
+* **(b) Ground truth is the score, not an independent transcription.** URMP's `Notes` files let Appendix L measure pitch recovery in cents against what was *performed*; this corpus has no such reference, so the figures here are detection/inclusion yield and deviation **relative to the written score**, not accuracy against an independent ground truth. The deviation column therefore measures the same quantity as Appendix H, not the recovery error of Appendix L.
+* **(c) Expressively played.** As with URMP (Appendix L), the performances carry vibrato and rubato that the controlled study protocol suppresses, so this remains a conservative test relative to the study's own recordings.
+* **(d) It does not revisit the `rms_threshold` default.** The single-corpus caveat this appendix answers is one of *generalisation of the pipeline's behaviour*; it is not a second amplitude-gate sweep, and Appendix I's decision to leave $\theta_{static}$ unchanged still stands pending a sweep on independent material.
+
+The per-stem results are written to `tests/scripts/validation/haydn_crosscorpus_results.csv`, which is not committed with this manual. The audio is CC-BY-NC and is **not** redistributed with this repository; only the derived aggregate statistics above are reported. The score-parsing harness depends on `music21`, pinned in `requirements.txt` as validation-only tooling.
